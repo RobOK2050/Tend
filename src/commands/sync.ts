@@ -182,9 +182,36 @@ async function getContactData(options: SyncOptions): Promise<ClayContact[]> {
     return contacts;
   }
 
-  // Mode 3: Single name (not yet supported - would use MCP)
+  // Mode 3: Single name (uses clay-mcp for real data)
   if (options.name) {
-    throw new Error('Single name search not yet implemented (requires Phase 1D MCP integration)');
+    try {
+      // This will fail with helpful instructions for now
+      const { ClayLocalMCPClient } = await import('../mcp/clay-local');
+      const mcpClient = new ClayLocalMCPClient();
+      const searchResult = await mcpClient.searchContacts({
+        query: options.name,
+        limit: 1
+      });
+
+      if (searchResult.results.length === 0) {
+        throw new Error(`No contact found in Clay: ${options.name}`);
+      }
+
+      const contactId = searchResult.results[0].id;
+      const contact = await mcpClient.getContact(contactId);
+      contacts.push(contact);
+
+      return contacts;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(
+        `Cannot search Clay by name (Phase 1D):\n${message}\n\n` +
+        `Workaround:\n` +
+        `1. Use --fixture sample to test with sample data\n` +
+        `2. Or use --input <file> with a list of contact names\n` +
+        `3. Or manually find contact ID and use: tend sync --id <id>`
+      );
+    }
   }
 
   // Mode 4: Input file
