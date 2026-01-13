@@ -11,11 +11,14 @@ export class BodySectionGenerator {
   generateBody(contact: TendContact): string {
     const sections: string[] = [];
 
-    // Links section
-    sections.push(this.generateLinksSection(contact));
+    // Professional header section
+    sections.push(this.generateProfessionalHeader(contact));
 
-    // Contact Details section
-    sections.push(this.generateContactDetailsSection(contact));
+    // Horizontal rule after header
+    sections.push('---');
+
+    // Contact information links
+    sections.push(this.generateContactLinksSection(contact));
 
     // Work History section (if exists)
     if (contact.workHistory.length > 0) {
@@ -46,87 +49,91 @@ export class BodySectionGenerator {
   }
 
   /**
-   * Generate Links section (for Obsidian wikilinks)
+   * Generate professional header section (top of file, very clean)
    */
-  private generateLinksSection(contact: TendContact): string {
-    let content = '## Links\n\n';
+  private generateProfessionalHeader(contact: TendContact): string {
+    let content = '';
 
-    // Add backlink suggestions
-    content += '[[400 People and Relationships MOC | People and Relationships]]\n';
-    content += '[[++Home | Index]]\n';
+    // Large name as H1
+    content += `# ${contact.name}\n\n`;
 
-    // Add TheBrain links if they exist
-    if (contact.brainLinks.length > 0) {
-      content += '\n### TheBrain References\n';
-      for (const link of contact.brainLinks) {
-        content += `- [[${link.thoughtName}]]\n`;
-      }
+    // Bio/headline as italic
+    if (contact.bio) {
+      content += `*${contact.bio}*\n\n`;
+    }
+
+    // Current role and location on one line
+    const roleAndLocation: string[] = [];
+    if (contact.title && contact.organization) {
+      roleAndLocation.push(`**${contact.title}** @ ${contact.organization}`);
+    } else if (contact.title) {
+      roleAndLocation.push(`**${contact.title}**`);
+    } else if (contact.organization) {
+      roleAndLocation.push(`**${contact.organization}**`);
+    }
+
+    if (contact.location) {
+      roleAndLocation.push(contact.location);
+    }
+
+    if (roleAndLocation.length > 0) {
+      content += roleAndLocation.join(' · ') + '\n\n';
+    }
+
+    // Birthday in light/muted font
+    if (contact.birthday) {
+      const monthDay = contact.birthday.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric'
+      });
+      content += `_Birthday: ${monthDay}_`;
     }
 
     return content;
   }
 
   /**
-   * Generate Contact Details section (compact table format)
+   * Generate contact links section (email, phone, socials, brain links)
    */
-  private generateContactDetailsSection(contact: TendContact): string {
-    let content = '## Contact Details\n\n';
-    const rows: string[] = [];
+  private generateContactLinksSection(contact: TendContact): string {
+    const links: string[] = [];
 
     // Email
     if (contact.email.length > 0) {
-      rows.push(`| Email | ${contact.email.join(', ')} |`);
+      for (const email of contact.email) {
+        links.push(`[${email}](mailto:${email})`);
+      }
     }
 
     // Phone
     if (contact.phone.length > 0) {
-      rows.push(`| Phone | ${contact.phone.join(', ')} |`);
+      for (const phone of contact.phone) {
+        links.push(`[${phone}](tel:${phone.replace(/\s/g, '')})`);
+      }
     }
 
-    // Location
-    if (contact.location) {
-      rows.push(`| Location | ${contact.location} |`);
-    }
-
-    // Organization & Title
-    if (contact.organization || contact.title) {
-      const org = contact.organization || '';
-      const title = contact.title || '';
-      rows.push(`| Role | ${title}${org ? ` @ ${org}` : ''} |`);
-    }
-
-    // Birthday
-    if (contact.birthday) {
-      const monthDay = contact.birthday.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric'
-      });
-      rows.push(`| Birthday | ${monthDay} |`);
-    }
-
-    // Social accounts (each on own row or one row with links)
+    // Social accounts
     if (contact.socialAccounts.length > 0) {
-      const socialLinks = contact.socialAccounts
-        .map(account => {
-          const displayName = account.platform.charAt(0).toUpperCase() + account.platform.slice(1);
-          return `[${displayName}](${account.url})`;
-        })
-        .join(' · ');
-      rows.push(`| Social | ${socialLinks} |`);
+      for (const account of contact.socialAccounts) {
+        const displayName = account.platform.charAt(0).toUpperCase() + account.platform.slice(1);
+        links.push(`[${displayName}](${account.url})`);
+      }
     }
 
-    // Build table if we have rows
-    if (rows.length > 0) {
-      content += '| | |\n';
-      content += '|---|---|\n';
-      content += rows.join('\n');
-    } else {
-      content += '[No contact details available]';
+    // TheBrain links as wikilinks
+    const brainLinks: string[] = [];
+    if (contact.brainLinks.length > 0) {
+      for (const link of contact.brainLinks) {
+        brainLinks.push(`[[${link.thoughtName}]]`);
+      }
     }
 
-    // Add bio at the end if exists
-    if (contact.bio) {
-      content += `\n\n**About:**\n${contact.bio}`;
+    // Build content
+    let content = links.join(' · ');
+
+    if (brainLinks.length > 0) {
+      if (content) content += '\n\n';
+      content += brainLinks.join(' · ');
     }
 
     return content;

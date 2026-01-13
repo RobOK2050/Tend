@@ -46,28 +46,19 @@ interactions:
   eventCount: 89
 ---
 
-## Links
+# Harry Oppenheim
 
-[[400 People and Relationships MOC | People and Relationships]]
-[[++Home | Index]]
+*Founder and CEO of Arc Aspicio. Passionate about government innovation and the future of federal technology.*
 
-### TheBrain References
-- [[Government Reform]]
+**CEO** @ Arc Aspicio · Washington, DC
 
+_Birthday: March 15_
 
-## Contact Details
+---
 
-| | |
-|---|---|
-| Email | harry@arcaspicio.com, harry.oppenheim@gmail.com |
-| Phone | +1-202-555-0123 |
-| Location | Washington, DC |
-| Role | CEO @ Arc Aspicio |
-| Birthday | Mar 15 |
-| Social | [Linkedin](https://linkedin.com/in/harryoppenheim) · [Twitter](https://twitter.com/hoppenheim) |
+[harry@arcaspicio.com](mailto:harry@arcaspicio.com) · [harry.oppenheim@gmail.com](mailto:harry.oppenheim@gmail.com) · [+1-202-555-0123](tel:+1-202-555-0123) · [Linkedin](https://linkedin.com/in/harryoppenheim) · [Twitter](https://twitter.com/hoppenheim)
 
-**About:**
-Founder and CEO of Arc Aspicio. Passionate about government innovation and the future of federal technology.
+[[Government Reform]]
 
 ## Work History
 
