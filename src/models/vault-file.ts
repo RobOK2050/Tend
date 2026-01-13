@@ -97,11 +97,12 @@ export const SECTION_CONFIG = {
     'Links',
     'Contact Details',
     'Work History',
-    'Education History',
+    'Education',
     'Interaction History',
     'Clay Notes'
   ],
   userSections: [
-    'Notes'
+    'Notes',
+    'Family Notes'
   ]
 };

@@ -57,47 +57,28 @@ interactions:
 
 ## Contact Details
 
-**Email:** harry@arcaspicio.com, harry.oppenheim@gmail.com
+| | |
+|---|---|
+| Email | harry@arcaspicio.com, harry.oppenheim@gmail.com |
+| Phone | +1-202-555-0123 |
+| Location | Washington, DC |
+| Role | CEO @ Arc Aspicio |
+| Birthday | Mar 15 |
+| Social | [Linkedin](https://linkedin.com/in/harryoppenheim) · [Twitter](https://twitter.com/hoppenheim) |
 
-**Phone:** +1-202-555-0123
-
-**Location:** Washington, DC
-
-**Bio:** Founder and CEO of Arc Aspicio. Passionate about government innovation and the future of federal technology.
-
-**Social Accounts:**
-- [Linkedin](https://linkedin.com/in/harryoppenheim)
-- [Twitter](https://twitter.com/hoppenheim)
-
-**Birthday:** March 15
-
+**About:**
+Founder and CEO of Arc Aspicio. Passionate about government innovation and the future of federal technology.
 
 ## Work History
 
-### CEO at Arc Aspicio
-
-**Status:** Currently employed
-
-### Senior Advisor at Federal Government
-
-**Period:** 2012 - 2017
+- CEO @ Arc Aspicio (current)
+- Senior Advisor @ Federal Government [2012-2017]
 
 
+## Education
 
-## Education History
-
-### Stanford University
-
-**Degree:** MBA
-
-**Period:** 2008 - 2010
-
-### University of Virginia
-
-**Degree:** B.A. in Government and Economics
-
-**Period:** 2002 - 2006
-
+- Stanford University - MBA [2008-2010]
+- University of Virginia - B.A. in Government and Economics [2002-2006]
 
 
 ## Interaction History
@@ -126,5 +107,9 @@ interactions:
 
 
 ## Notes
+
+[User notes - preserved across syncs]
+
+## Family Notes
 
 [User notes - preserved across syncs]

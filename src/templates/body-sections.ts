@@ -38,8 +38,9 @@ export class BodySectionGenerator {
     // Horizontal rule to separate system sections from user sections
     sections.push('---\n');
 
-    // User-managed section (never overwritten by Tend)
+    // User-managed sections (never overwritten by Tend)
     sections.push(this.generateUserSection('Notes'));
+    sections.push(this.generateUserSection('Family Notes'));
 
     return sections.join('\n\n');
   }
@@ -66,87 +67,114 @@ export class BodySectionGenerator {
   }
 
   /**
-   * Generate Contact Details section
+   * Generate Contact Details section (compact table format)
    */
   private generateContactDetailsSection(contact: TendContact): string {
     let content = '## Contact Details\n\n';
+    const rows: string[] = [];
 
+    // Email
     if (contact.email.length > 0) {
-      content += `**Email:** ${contact.email.join(', ')}\n\n`;
+      rows.push(`| Email | ${contact.email.join(', ')} |`);
     }
 
+    // Phone
     if (contact.phone.length > 0) {
-      content += `**Phone:** ${contact.phone.join(', ')}\n\n`;
+      rows.push(`| Phone | ${contact.phone.join(', ')} |`);
     }
 
+    // Location
     if (contact.location) {
-      content += `**Location:** ${contact.location}\n\n`;
+      rows.push(`| Location | ${contact.location} |`);
     }
 
-    if (contact.bio) {
-      content += `**Bio:** ${contact.bio}\n\n`;
+    // Organization & Title
+    if (contact.organization || contact.title) {
+      const org = contact.organization || '';
+      const title = contact.title || '';
+      rows.push(`| Role | ${title}${org ? ` @ ${org}` : ''} |`);
     }
 
-    // Social accounts
-    if (contact.socialAccounts.length > 0) {
-      content += '**Social Accounts:**\n';
-      for (const account of contact.socialAccounts) {
-        const displayName = account.platform.charAt(0).toUpperCase() + account.platform.slice(1);
-        content += `- [${displayName}](${account.url})\n`;
-      }
-      content += '\n';
-    }
-
+    // Birthday
     if (contact.birthday) {
       const monthDay = contact.birthday.toLocaleDateString('en-US', {
-        month: 'long',
+        month: 'short',
         day: 'numeric'
       });
-      content += `**Birthday:** ${monthDay}\n`;
+      rows.push(`| Birthday | ${monthDay} |`);
+    }
+
+    // Social accounts (each on own row or one row with links)
+    if (contact.socialAccounts.length > 0) {
+      const socialLinks = contact.socialAccounts
+        .map(account => {
+          const displayName = account.platform.charAt(0).toUpperCase() + account.platform.slice(1);
+          return `[${displayName}](${account.url})`;
+        })
+        .join(' · ');
+      rows.push(`| Social | ${socialLinks} |`);
+    }
+
+    // Build table if we have rows
+    if (rows.length > 0) {
+      content += '| | |\n';
+      content += '|---|---|\n';
+      content += rows.join('\n');
+    } else {
+      content += '[No contact details available]';
+    }
+
+    // Add bio at the end if exists
+    if (contact.bio) {
+      content += `\n\n**About:**\n${contact.bio}`;
     }
 
     return content;
   }
 
   /**
-   * Generate Work History section
+   * Generate Work History section (compact one-liners)
    */
   private generateWorkHistorySection(contact: TendContact): string {
     let content = '## Work History\n\n';
 
     for (const work of contact.workHistory) {
-      content += `### ${work.title} at ${work.company}\n\n`;
+      let entry = `- ${work.title} @ ${work.company}`;
 
       if (work.isActive) {
-        content += '**Status:** Currently employed\n\n';
+        entry += ' (current)';
       } else if (work.startYear && work.endYear) {
-        content += `**Period:** ${work.startYear} - ${work.endYear}\n\n`;
+        entry += ` [${work.startYear}-${work.endYear}]`;
       } else if (work.startYear) {
-        content += `**Started:** ${work.startYear}\n\n`;
+        entry += ` [since ${work.startYear}]`;
       }
+
+      content += entry + '\n';
     }
 
     return content;
   }
 
   /**
-   * Generate Education History section
+   * Generate Education History section (compact one-liners)
    */
   private generateEducationHistorySection(contact: TendContact): string {
-    let content = '## Education History\n\n';
+    let content = '## Education\n\n';
 
     for (const edu of contact.educationHistory) {
-      content += `### ${edu.school}\n\n`;
+      let entry = edu.school;
 
       if (edu.degree) {
-        content += `**Degree:** ${edu.degree}\n\n`;
+        entry += ` - ${edu.degree}`;
       }
 
       if (edu.startYear && edu.endYear) {
-        content += `**Period:** ${edu.startYear} - ${edu.endYear}\n\n`;
+        entry += ` [${edu.startYear}-${edu.endYear}]`;
       } else if (edu.startYear) {
-        content += `**Started:** ${edu.startYear}\n\n`;
+        entry += ` [${edu.startYear}]`;
       }
+
+      content += `- ${entry}\n`;
     }
 
     return content;
