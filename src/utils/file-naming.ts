@@ -39,29 +39,3 @@ export function generateFilename(contactName: string): string {
   return `${sanitized}.md`;
 }
 
-/**
- * Generate a unique filename by adding a numeric suffix if the base name exists
- * Used for handling duplicate names in the vault
- */
-export function generateUniqueFilename(
-  baseFilename: string,
-  existingFilenames: Set<string>
-): string {
-  if (!existingFilenames.has(baseFilename)) {
-    return baseFilename;
-  }
-
-  // File exists, add numeric suffix
-  const parts = baseFilename.split('.');
-  const extension = parts.pop() || '';
-  const nameWithoutExt = parts.join('.');
-
-  let counter = 2;
-  while (true) {
-    const newFilename = `${nameWithoutExt}-${counter}.${extension}`;
-    if (!existingFilenames.has(newFilename)) {
-      return newFilename;
-    }
-    counter++;
-  }
-}

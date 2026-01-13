@@ -6,7 +6,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import type { TendContact } from '../models/tend-contact';
 import { TemplateEngine } from '../templates/template-engine';
-import { generateFilename, generateUniqueFilename } from '../utils/file-naming';
+import { generateFilename } from '../utils/file-naming';
 
 export interface FileManagerConfig {
   vaultPath: string;
@@ -28,25 +28,25 @@ export class VaultFileManager {
 
   /**
    * Write a contact to a markdown file in the vault
+   * If file exists, overwrites it (Phase 1.2 will add intelligent merge logic)
    */
   async writeContact(contact: TendContact): Promise<{ filepath: string; created: boolean }> {
     // Generate filename
-    const baseFilename = generateFilename(contact.name);
-
-    // Check if file exists and handle duplicates
-    const existingFiles = await this.getExistingFiles();
-    const filename = generateUniqueFilename(baseFilename, existingFiles);
+    const filename = generateFilename(contact.name);
     const filepath = path.join(this.vaultPath, filename);
+
+    // Check if file exists
+    const existed = await fs.pathExists(filepath);
 
     // Generate markdown
     const markdown = this.templateEngine.generateMarkdown(contact);
 
-    // Write to file
+    // Write to file (creates or overwrites)
     await fs.writeFile(filepath, markdown, 'utf-8');
 
     return {
       filepath,
-      created: !existingFiles.has(filename)
+      created: !existed
     };
   }
 
@@ -67,28 +67,6 @@ export class VaultFileManager {
   async fileExists(filename: string): Promise<boolean> {
     const filepath = path.join(this.vaultPath, filename);
     return fs.pathExists(filepath);
-  }
-
-  /**
-   * Get all existing markdown files in the vault
-   */
-  private async getExistingFiles(): Promise<Set<string>> {
-    const files = new Set<string>();
-
-    try {
-      const entries = await fs.readdir(this.vaultPath, { recursive: true });
-
-      for (const entry of entries) {
-        if (typeof entry === 'string' && entry.endsWith('.md')) {
-          files.add(path.basename(entry));
-        }
-      }
-    } catch (error) {
-      // If we can't read the directory, just return empty set
-      // This handles cases where vault is empty
-    }
-
-    return files;
   }
 
   /**
