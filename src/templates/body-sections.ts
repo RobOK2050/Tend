@@ -38,10 +38,8 @@ export class BodySectionGenerator {
     // Horizontal rule to separate system sections from user sections
     sections.push('---\n');
 
-    // User-managed sections (these are never overwritten by Tend)
+    // User-managed section (never overwritten by Tend)
     sections.push(this.generateUserSection('Notes'));
-    sections.push(this.generateUserSection('Journal'));
-    sections.push(this.generateUserSection('Thoughts'));
 
     return sections.join('\n\n');
   }

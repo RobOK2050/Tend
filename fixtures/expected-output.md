@@ -128,11 +128,3 @@ interactions:
 ## Notes
 
 [User notes - preserved across syncs]
-
-## Journal
-
-[User notes - preserved across syncs]
-
-## Thoughts
-
-[User notes - preserved across syncs]

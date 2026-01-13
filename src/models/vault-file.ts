@@ -102,9 +102,6 @@ export const SECTION_CONFIG = {
     'Clay Notes'
   ],
   userSections: [
-    'Notes',
-    'Journal',
-    'Thoughts',
-    'Personal'
+    'Notes'
   ]
 };
