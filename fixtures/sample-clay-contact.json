@@ -1,0 +1,83 @@
+{
+  "id": 12345,
+  "displayName": "Harry Oppenheim",
+  "name": "Harry Oppenheim",
+  "avatarURL": "https://example.com/avatar.jpg",
+  "isMemorialized": false,
+  "bio": "Founder and CEO of Arc Aspicio. Passionate about government innovation and the future of federal technology.",
+  "location": "Washington, DC",
+  "birthday": "3/15",
+  "emails": [
+    "harry@arcaspicio.com",
+    "harry.oppenheim@gmail.com"
+  ],
+  "phone_numbers": [
+    "+1-202-555-0123"
+  ],
+  "social_links": [
+    "https://linkedin.com/in/harryoppenheim",
+    "https://twitter.com/hoppenheim"
+  ],
+  "work_history": [
+    {
+      "company": "Arc Aspicio",
+      "title": "CEO",
+      "is_active": true,
+      "start_year": 2018
+    },
+    {
+      "company": "Federal Government",
+      "title": "Senior Advisor",
+      "is_active": false,
+      "start_year": 2012,
+      "end_year": 2017
+    }
+  ],
+  "education_history": [
+    {
+      "school": "Stanford University",
+      "degree": "MBA",
+      "start_year": 2008,
+      "end_year": 2010
+    },
+    {
+      "school": "University of Virginia",
+      "degree": "B.A. in Government and Economics",
+      "start_year": 2002,
+      "end_year": 2006
+    }
+  ],
+  "score": 95,
+  "message_history": {
+    "first_date": "2020-10-15T10:30:00Z",
+    "last_date": "2025-06-03T14:22:00Z",
+    "count": 245
+  },
+  "interaction_history": {
+    "first_date": "2020-10-15T10:30:00Z",
+    "last_date": "2025-06-03T14:22:00Z"
+  },
+  "email_history": {
+    "first_date": "2020-10-16T09:15:00Z",
+    "last_date": "2025-05-28T16:45:00Z",
+    "count": 1203
+  },
+  "event_history": {
+    "first_date": "2020-11-05T14:00:00Z",
+    "last_date": "2025-06-02T15:30:00Z",
+    "count": 89
+  },
+  "created": "2020-10-15T10:30:00Z",
+  "url": "https://web.clay.earth/open/contact/12345",
+  "notes": [
+    "Met at Bitcoin conference 2021",
+    "Discussed government innovation initiatives brain://api.thebrain.com/abc123/def456/Government%20Reform",
+    "Interested in emerging tech and public service"
+  ],
+  "integrations": [
+    "calendar",
+    "email",
+    "linkedin",
+    "messages"
+  ]
+}
