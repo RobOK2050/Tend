@@ -17,8 +17,11 @@ export class BodySectionGenerator {
     // Horizontal rule after header
     sections.push('---');
 
-    // Contact information links
+    // Contact information links (including Clay app link)
     sections.push(this.generateContactLinksSection(contact));
+
+    // Notes section (user-managed, appears early, new notes added at top)
+    sections.push(this.generateNotesSection());
 
     // Work History section (if exists)
     if (contact.workHistory.length > 0) {
@@ -41,8 +44,7 @@ export class BodySectionGenerator {
     // Horizontal rule to separate system sections from user sections
     sections.push('---\n');
 
-    // User-managed sections (never overwritten by Tend)
-    sections.push(this.generateUserSection('Notes'));
+    // Family Notes section (user-managed)
     sections.push(this.generateUserSection('Family Notes'));
 
     return sections.join('\n\n');
@@ -93,7 +95,7 @@ export class BodySectionGenerator {
   }
 
   /**
-   * Generate contact links section (email, phone, socials, brain links)
+   * Generate contact links section (email, phone, socials, Clay link, brain links)
    */
   private generateContactLinksSection(contact: TendContact): string {
     const links: string[] = [];
@@ -120,6 +122,9 @@ export class BodySectionGenerator {
       }
     }
 
+    // Clay app link
+    links.push(`[Clay](clay://contact/${contact.clayId})`);
+
     // TheBrain links as wikilinks
     const brainLinks: string[] = [];
     if (contact.brainLinks.length > 0) {
@@ -140,6 +145,15 @@ export class BodySectionGenerator {
   }
 
   /**
+   * Generate Notes section (user-managed, new notes added at top)
+   * Format: #note content (YYYY-MM-DD)
+   */
+  private generateNotesSection(): string {
+    const today = new Date().toISOString().split('T')[0];
+    return `## Notes\n\n#note extracted from Clay (${today})`;
+  }
+
+  /**
    * Generate Work History section (compact one-liners)
    */
   private generateWorkHistorySection(contact: TendContact): string {
@@ -151,9 +165,9 @@ export class BodySectionGenerator {
       if (work.isActive) {
         entry += ' (current)';
       } else if (work.startYear && work.endYear) {
-        entry += ` [${work.startYear}-${work.endYear}]`;
+        entry += ` (${work.startYear}-${work.endYear})`;
       } else if (work.startYear) {
-        entry += ` [since ${work.startYear}]`;
+        entry += ` (since ${work.startYear})`;
       }
 
       content += entry + '\n';
@@ -176,9 +190,9 @@ export class BodySectionGenerator {
       }
 
       if (edu.startYear && edu.endYear) {
-        entry += ` [${edu.startYear}-${edu.endYear}]`;
+        entry += ` (${edu.startYear}-${edu.endYear})`;
       } else if (edu.startYear) {
-        entry += ` [${edu.startYear}]`;
+        entry += ` (${edu.startYear})`;
       }
 
       content += `- ${entry}\n`;
@@ -218,15 +232,30 @@ export class BodySectionGenerator {
 
   /**
    * Generate Clay Notes section
+   * Converts Clay contact references to Obsidian wikilinks
    */
   private generateClayNotesSection(contact: TendContact): string {
     let content = '## Clay Notes\n\n';
 
     for (let i = 0; i < contact.clayNotes.length; i++) {
-      content += `- ${contact.clayNotes[i]}\n`;
+      let note = contact.clayNotes[i];
+      // Convert Clay contact references [contact:ID:Name] to Obsidian format [[Name]] (clay://contact/ID)
+      note = this.parseClaySocialReferences(note);
+      content += `- ${note}\n`;
     }
 
     return content;
+  }
+
+  /**
+   * Parse Clay contact references and convert to Obsidian wikilinks
+   * Converts: [contact:45340206:Vincent Arena]
+   * To: [[Vincent Arena]] (clay://contact/45340206)
+   */
+  private parseClaySocialReferences(text: string): string {
+    return text.replace(/\[contact:(\d+):([^\]]+)\]/g, (match, contactId, name) => {
+      return `[[${name}]] (clay://contact/${contactId})`;
+    });
   }
 
   /**

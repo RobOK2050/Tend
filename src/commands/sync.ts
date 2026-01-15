@@ -17,6 +17,7 @@ interface SyncOptions {
   vault?: string;
   dryRun?: boolean;
   verbose?: boolean;
+  mcp?: 'official' | 'local'; // MCP strategy: default is 'official'
 }
 
 export async function syncCommand(options: SyncOptions): Promise<void> {
@@ -69,10 +70,11 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
         // Write to vault
         if (!options.dryRun) {
           const { filepath, created } = await fileManager.writeContact(tendContact);
+          const relativePath = path.relative(vaultPath, filepath);
 
           if (options.verbose) {
             spinner.info(
-              `✓ ${created ? 'Created' : 'Updated'}: ${path.basename(filepath)}`
+              `✓ ${created ? 'Created' : 'Updated'}: ${relativePath}`
             );
           } else {
             spinner.succeed(`${clayContact.name}`);
@@ -182,12 +184,24 @@ async function getContactData(options: SyncOptions): Promise<ClayContact[]> {
     return contacts;
   }
 
-  // Mode 3: Single name (uses clay-mcp for real data)
+  // Mode 3: Single name (uses Clay MCP for real data)
   if (options.name) {
     try {
-      // This will fail with helpful instructions for now
-      const { ClayLocalMCPClient } = await import('../mcp/clay-local');
-      const mcpClient = new ClayLocalMCPClient();
+      // Use factory pattern with selected strategy (default: official)
+      const { MCPClientFactory } = await import('../mcp/client');
+      const strategy = options.mcp || 'official';
+
+      let mcpClient;
+      if (strategy === 'local') {
+        // For local strategy, create directly with API key support
+        const { ClayLocalMCPClient } = await import('../mcp/clay-local');
+        const apiKey = process.env.CLAY_API_KEY;
+        mcpClient = new ClayLocalMCPClient(apiKey);
+      } else {
+        // For official strategy, use factory
+        mcpClient = MCPClientFactory.createClient(strategy);
+      }
+
       const searchResult = await mcpClient.searchContacts({
         query: options.name,
         limit: 1
@@ -205,11 +219,11 @@ async function getContactData(options: SyncOptions): Promise<ClayContact[]> {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(
-        `Cannot search Clay by name (Phase 1D):\n${message}\n\n` +
+        `Cannot search Clay by name:\n${message}\n\n` +
         `Workaround:\n` +
         `1. Use --fixture sample to test with sample data\n` +
         `2. Or use --input <file> with a list of contact names\n` +
-        `3. Or manually find contact ID and use: tend sync --id <id>`
+        `3. Make sure CLAY_API_KEY environment variable is set`
       );
     }
   }

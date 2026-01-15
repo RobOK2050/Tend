@@ -28,6 +28,7 @@ export interface Frontmatter {
 
   // Relationship Context
   tags?: string[];
+  communities?: string[];
   priority?: Priority;
   lastContact?: string; // ISO date
   nextFollowup?: string; // ISO date

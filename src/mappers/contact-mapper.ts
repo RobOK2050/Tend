@@ -35,6 +35,7 @@ export class ContactMapper {
 
       // Relationship Context
       tags: this.inferTags(clay),
+      communities: clay.groups || [], // Map Clay groups to communities
       priority: this.inferPriority(clay),
       lastContact: this.getLastContactDate(clay),
       nextFollowup: null, // User-managed field

@@ -39,6 +39,7 @@ export class FrontmatterGenerator {
 
       // Relationship Context
       ...(contact.tags.length > 0 && { tags: contact.tags }),
+      ...(contact.communities.length > 0 && { communities: contact.communities }),
       ...(contact.priority && { priority: contact.priority }),
       ...(contact.lastContact && { lastContact: this.formatDate(contact.lastContact) }),
       ...(contact.nextFollowup && {

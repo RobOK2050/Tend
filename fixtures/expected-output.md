@@ -56,9 +56,13 @@ _Birthday: March 15_
 
 ---
 
-[harry@arcaspicio.com](mailto:harry@arcaspicio.com) · [harry.oppenheim@gmail.com](mailto:harry.oppenheim@gmail.com) · [+1-202-555-0123](tel:+1-202-555-0123) · [Linkedin](https://linkedin.com/in/harryoppenheim) · [Twitter](https://twitter.com/hoppenheim)
+[harry@arcaspicio.com](mailto:harry@arcaspicio.com) · [harry.oppenheim@gmail.com](mailto:harry.oppenheim@gmail.com) · [+1-202-555-0123](tel:+1-202-555-0123) · [Linkedin](https://linkedin.com/in/harryoppenheim) · [Twitter](https://twitter.com/hoppenheim) · [Clay](clay://contact/12345)
 
 [[Government Reform]]
+
+## Notes
+
+#note [extracted from Clay] (2026-01-13)
 
 ## Work History
 
@@ -96,10 +100,6 @@ _Birthday: March 15_
 
 ---
 
-
-## Notes
-
-[User notes - preserved across syncs]
 
 ## Family Notes
 

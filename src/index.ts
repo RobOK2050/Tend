@@ -21,6 +21,7 @@ program
   .option('-n, --name <name>', 'Sync a single contact by name')
   .option('-i, --input <file>', 'Sync contacts from input file (one name per line)')
   .option('-v, --vault <path>', 'Vault path (overrides config)')
+  .option('--mcp <strategy>', 'MCP strategy: "official" (default, cloud-based) or "local"')
   .option('--dry-run', 'Preview without writing files')
   .option('--verbose', 'Verbose logging')
   .action(syncCommand);

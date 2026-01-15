@@ -32,6 +32,9 @@ export interface ClayContact {
   email_history: InteractionCount;
   event_history: InteractionCount;
 
+  // Organization
+  groups?: string[]; // Clay groups/communities this contact belongs to
+
   // Metadata
   created: string; // ISO datetime - when added to Clay
   url: string; // Clay web URL

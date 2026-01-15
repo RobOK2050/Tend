@@ -23,6 +23,7 @@ export interface TendContact {
 
   // Relationship Context
   tags: string[];
+  communities: string[]; // Clay groups (Bitcoin, Arc Aspicio, Photography, Family, etc.)
   priority: Priority;
   lastContact: Date | null;
   nextFollowup: Date | null;

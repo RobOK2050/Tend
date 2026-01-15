@@ -56,3 +56,27 @@ export interface ClayLocalSearchResult {
   total?: number;
   results: any[]; // Array of contacts matching search
 }
+
+/**
+ * Clay Official MCP search parameters
+ */
+export interface ClayOfficialSearchParams {
+  query: string; // Required - raw search query (name, email, etc.)
+  limit?: number; // Default 10
+  exclude_contact_ids?: (string | number)[];
+}
+
+/**
+ * Clay Official MCP getContact parameters
+ */
+export interface ClayOfficialGetContactParams {
+  contact_id: string | number; // Required - can be numeric or string ID
+}
+
+/**
+ * Search result from Clay Official MCP
+ */
+export interface ClayOfficialSearchResult {
+  total?: number;
+  results: any[]; // Array of contacts matching search
+}

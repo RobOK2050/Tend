@@ -12,6 +12,12 @@ export interface FileManagerConfig {
   vaultPath: string;
 }
 
+/**
+ * Communities that get their own subfolders
+ * Ordered by priority (first match wins if contact is in multiple)
+ */
+const SPECIAL_COMMUNITIES = ['Family', 'Bitcoin', 'Arc Aspicio', 'Photography'] as const;
+
 export class VaultFileManager {
   private vaultPath: string;
   private templateEngine: TemplateEngine;
@@ -28,12 +34,26 @@ export class VaultFileManager {
 
   /**
    * Write a contact to a markdown file in the vault
+   * Organizes into subfolders based on special communities (Family, Bitcoin, Arc Aspicio, Photography)
+   * Other contacts go in the main vault folder
    * If file exists, overwrites it (Phase 1.2 will add intelligent merge logic)
    */
   async writeContact(contact: TendContact): Promise<{ filepath: string; created: boolean }> {
     // Generate filename
     const filename = generateFilename(contact.name);
-    const filepath = path.join(this.vaultPath, filename);
+
+    // Determine which subfolder (if any) based on communities
+    const subfolder = this.getSubfolderForContact(contact);
+
+    // Build the directory path
+    let dirPath = this.vaultPath;
+    if (subfolder) {
+      dirPath = path.join(this.vaultPath, subfolder);
+      // Ensure subfolder exists
+      await fs.ensureDir(dirPath);
+    }
+
+    const filepath = path.join(dirPath, filename);
 
     // Check if file exists
     const existed = await fs.pathExists(filepath);
@@ -48,6 +68,19 @@ export class VaultFileManager {
       filepath,
       created: !existed
     };
+  }
+
+  /**
+   * Determine which special community subfolder a contact belongs to
+   * Returns the first matching community in priority order, or null for main folder
+   */
+  private getSubfolderForContact(contact: TendContact): string | null {
+    for (const community of SPECIAL_COMMUNITIES) {
+      if (contact.communities.includes(community)) {
+        return community;
+      }
+    }
+    return null;
   }
 
   /**
