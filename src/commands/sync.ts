@@ -189,7 +189,7 @@ async function getContactData(options: SyncOptions): Promise<ClayContact[]> {
     try {
       // Use factory pattern with selected strategy (default: official)
       const { MCPClientFactory } = await import('../mcp/client');
-      const strategy = options.mcp || 'official';
+      const strategy = options.mcp || 'local';
 
       let mcpClient;
       if (strategy === 'local') {
