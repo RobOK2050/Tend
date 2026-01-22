@@ -30,6 +30,15 @@ npm-debug.log*
 # Testing
 coverage/
 .nyc_output/
+test-*.csv
+test-*.txt
+sample-*.json
+fixtures/sample-*.json
+
+# Runtime
+tend-checkpoint.txt
+Tend-log.md
+contacts-*.csv
 
 # OS
 .DS_Store
