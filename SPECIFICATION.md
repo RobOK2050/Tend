@@ -34,7 +34,6 @@ A unified, plaintext relationship management system that:
 - Support batch processing for multiple contacts
 
 **Secondary:**
-- Integrate with other tools (TheBrain, Claude Code, etc.)
 - Enable bidirectional workflows (update Clay from Obsidian notes)
 - Support complex relationship queries via Dataview
 - Scale to 200+ contacts
@@ -242,7 +241,6 @@ Result: List of contacts needing attention
 - User-managed sections: Notes, Family Notes
 - Table-based contact details (not verbose)
 - One-liner work/education entries
-- TheBrain link extraction from Clay notes
 
 #### 5.3 CLI Interface
 - Single `tend sync` command
@@ -274,13 +272,31 @@ Result: List of contacts needing attention
 - **Never** overwrite user sections
 - Smart conflict handling
 
-#### 5.7 Batch Processing (Phase 1E)
-- Read list of contact names from file
-- Process multiple contacts in sequence
-- Progress reporting
-- Error tracking and summary
-- Configurable batch size
-- Delay between requests (rate limiting)
+#### 5.7 Batch Processing (Phase 1E) ✅ Complete
+**Input File Formats:**
+- **Text (.txt):** One contact name per line. Lines starting with `#` are comments.
+- **CSV (.csv):** Compact format with columns: `Name`, `Given Name`, `Family Name`, `Group Membership`, `External ID 1 - Value`
+
+**Group Membership Handling:**
+- Groups are extracted from CSV's `Group Membership` column (delimited by ` ::: `)
+- System entries (starting with `*`) are filtered out
+- Contacts are organized into group folders based on priority list (defined in `config/group-priority.md`)
+- Contacts with 0 groups → `Ungrouped/` folder
+- Contacts with 1 group → group folder (no priority check needed)
+- Contacts with 2+ groups → highest priority group folder (first match in priority list)
+
+**Checkpoint & Resume:**
+- Persistent state tracking in `tend-checkpoint.txt` stores last successfully processed sequence number
+- Supports resumable processing: interruptions don't lose progress
+- Each contact written updates checkpoint immediately
+- On error: checkpoint not updated, allows resume from failure point
+
+**Features:**
+- Configurable batch size (limit contacts processed per run)
+- Rate limiting: 100ms delay between MCP API calls
+- Progress reporting with success/failure counts
+- Error tracking with detailed messages
+- Dry-run mode for preview without writing files
 
 #### 5.8 Configuration Management (Phase 1E)
 - JSON config file support
@@ -288,6 +304,41 @@ Result: List of contacts needing attention
 - MCP endpoint configuration
 - Template customization
 - Logging level settings
+
+#### 5.8 Group-Based Folder Organization ✅ Complete
+**Vault Structure:**
+```
+40 Connections/
+├── Grouped/
+│   ├── Family/
+│   │   ├── Jim O'Keefe.md
+│   │   ├── Lynn Ann Casey.md
+│   │   └── ...
+│   ├── 1. Tech Advisor/
+│   │   ├── Zachary Hamed.md
+│   │   └── ...
+│   ├── 3. OGM/
+│   │   ├── John Warinner.md
+│   │   └── ...
+│   └── [other groups]
+└── Ungrouped/
+    ├── Trevor James Newell.md
+    ├── christopher Bennett'.md
+    └── ...
+```
+
+**Group Priority List:**
+Defined in `config/group-priority.md`, specifies the order of groups for priority matching. When a contact belongs to multiple groups, it's placed in the folder of the highest-priority group.
+
+**Algorithm:**
+1. If contact has 0 groups → place in `Ungrouped/`
+2. If contact has 1 group → place in that group's folder (no priority check)
+3. If contact has 2+ groups → iterate through priority list in order, place in first matching group
+
+**Example:**
+- Contact has groups: ["5. Wine", "2D. Acquaintance", "Arc Aspicio"]
+- Priority list order: ["O. Life Connections", "Family", "Arc Aspicio", "1. Tech Advisor", "3. OGM", ...]
+- Result: Contact placed in `Arc Aspicio/` (comes first in priority list)
 
 #### 5.9 Logging & Monitoring (Phase 1E)
 - Structured logging
@@ -304,13 +355,7 @@ Result: List of contacts needing attention
 - Duplicate detection
 - Advanced filtering
 
-#### 5.11 TheBrain Integration (UnBrain Project)
-- Parse brain:// links from Clay notes
-- Create bidirectional links
-- Optional TheBrain thought updates
-- Knowledge graph visualization
-
-#### 5.12 Bidirectional Sync
+#### 5.11 Bidirectional Sync
 - Update Clay from Obsidian edits
 - Keep Clay as source, Obsidian as interface
 - Conflict resolution strategy
@@ -395,9 +440,8 @@ Result: List of contacts needing attention
   clayId: number;
   clayUrl: string;
 
-  // Notes & Links
+  // Notes
   clayNotes: string[];
-  brainLinks: [{brainId, thoughtId, thoughtName, url}];
 
   // Metadata
   clayCreated: Date;
@@ -509,13 +553,17 @@ tend sync [options]
 
 **Options:**
 ```
--n, --name <name>        Sync single contact by name
--i, --input <file>       Sync from file (one name per line)
--f, --fixture <name>     Use fixture for testing
--v, --vault <path>       Override vault path
---dry-run                Preview without writing
---verbose                Detailed output
--h, --help               Show help
+-n, --name <name>           Sync single contact by name
+-i, --input <file>          Sync from file (.txt or .csv format)
+-f, --fixture <name>        Use fixture for testing
+--batch-size <number>       Limit batch to N contacts (default: all)
+--start-from <sequence>     Start from specific sequence number (CSV mode, overrides checkpoint)
+--reset-checkpoint          Reset checkpoint and process from beginning (CSV mode)
+-v, --vault <path>          Override vault path
+--mcp <strategy>            MCP strategy: "official" or "local" (default: local)
+--dry-run                   Preview without writing
+--verbose                   Detailed output
+-h, --help                  Show help
 ```
 
 **Examples:**
@@ -526,14 +574,27 @@ tend sync
 # Single contact
 tend sync --name "Harry Oppenheim"
 
-# Batch from file
-tend sync --input contacts.txt
+# Text file mode (simple names)
+tend sync --input contacts.txt --batch-size 5 --verbose
 
-# Preview only
-tend sync --dry-run --verbose
+# CSV mode with batch limit (first 100 contacts)
+tend sync --input contacts.csv --batch-size 100 --verbose
 
-# Custom vault
-tend sync --vault /path/to/vault
+# Resume from checkpoint (CSV mode)
+# - Reads checkpoint, starts from last sequence + 1
+tend sync --input contacts.csv --batch-size 100 --verbose
+
+# Reset checkpoint and restart from beginning
+tend sync --input contacts.csv --batch-size 100 --reset-checkpoint
+
+# Override checkpoint, start from specific sequence
+tend sync --input contacts.csv --batch-size 100 --start-from 500
+
+# Preview only (no file writes)
+tend sync --input contacts.csv --batch-size 10 --dry-run --verbose
+
+# Custom vault path
+tend sync --input contacts.csv --vault /custom/vault/path
 ```
 
 **Exit Codes:**
@@ -569,12 +630,57 @@ Summary:
 - Max length: 200 characters
 - Trim leading/trailing spaces and dots
 
+### Input File Formats
+
+#### Text File (.txt)
+**Format:** One contact name per line
+```
+John Haar
+Jane Smith
+Harry Oppenheim
+# This is a comment - ignored
+Alice Johnson
+Bob Williams
+```
+
+**Rules:**
+- One name per line (full name or partial name for Clay search)
+- Lines starting with `#` are comments
+- Empty lines are ignored
+- Whitespace is trimmed automatically
+
+#### CSV File (.csv) - Compact Format
+**Format:** Five columns with headers
+```
+Name,Given Name,Family Name,Group Membership,External ID 1 - Value
+John Haar,John,Haar,Family,45251961
+Jane Smith,Jane,Smith,1. Tech Advisor ::: 3. OGM,45251751
+Harry Oppenheim,Harry,Oppenheim,Arc Aspicio ::: Cornell,45252064
+Alice Johnson,Alice,Johnson,* myContacts,45251688
+Bob Williams,Bob,Williams,Family ::: 1. Tech Advisor,45262952
+```
+
+**Column Descriptions:**
+- **Name:** Full name (for human readability only)
+- **Given Name:** First name (for human readability only)
+- **Family Name:** Last name (for human readability only)
+- **Group Membership:** Space-delimited group list; system entries starting with `*` are filtered out
+- **External ID 1 - Value:** Clay contact ID (numeric)
+
+**Rules:**
+- Header row is mandatory with exact column names (case-sensitive)
+- Fields with commas must be quoted: `"Smith, Jr.", "Smith", "Jr."`
+- Group Membership uses ` ::: ` as delimiter (three spaces with colons)
+- System entries (starting with `*`) are automatically filtered out
+- Auto-generates sequence numbers from row position (1, 2, 3, ...)
+- Checkpoint file tracks last processed sequence for resume capability
+
 ### YAML Frontmatter
 **Required fields:**
 - `name` - Contact full name
 - `type` - person | organization | contact
 - `clayId` - Numeric ID from Clay
-- `status` - active | dormant | archived
+- `status` - active | dormant (based on 2-year interaction history threshold)
 - `created` - ISO date (YYYY-MM-DD)
 - `updated` - ISO date (YYYY-MM-DD)
 
@@ -584,6 +690,7 @@ Summary:
 - `location` - City, State or location string
 - `social` - Object {platform: url}
 - `tags` - Array of tags
+- `communities` - Array of group names (from CSV Group Membership column)
 - `priority` - high | medium | low
 - `lastContact` - ISO date
 - `nextFollowup` - ISO date (user-managed)
@@ -647,6 +754,40 @@ YYYY-MM-DD format only
 - Phone numbers stored as-is (user responsible for format)
 - URLs must be valid
 - Dates must be ISO 8601
+
+### Checkpoint File (tend-checkpoint.txt)
+**Purpose:** Persistent state tracking for resumable batch processing
+
+**Format:**
+```
+20
+```
+Simple integer file containing the last successfully processed sequence number.
+
+**Behavior:**
+- Created automatically on first batch run
+- Updated after each successfully synced contact
+- Not updated if contact sync fails (allows resume from failure point)
+- Used by `--start-from` and `--reset-checkpoint` options
+
+**Example Workflow:**
+```
+# First run: Process contacts 1-100
+tend sync --input contacts.csv --batch-size 100
+# Creates tend-checkpoint.txt with: 100
+
+# Next run: Process contacts 101-200 (resumes from checkpoint)
+tend sync --input contacts.csv --batch-size 100
+# Updates tend-checkpoint.txt with: 200
+
+# Override checkpoint
+tend sync --input contacts.csv --batch-size 100 --start-from 500
+# Updates tend-checkpoint.txt with: 600
+
+# Reset checkpoint
+tend sync --input contacts.csv --batch-size 100 --reset-checkpoint
+# Resets tend-checkpoint.txt, starts from 0
+```
 
 ---
 
@@ -850,12 +991,6 @@ FileManager.writeContact()
 - Advanced filtering and search
 - Reminder management
 
-### TheBrain Integration
-- Automatic TheBrain thought creation
-- Bidirectional linking
-- Knowledge graph visualization
-- Thought merging
-
 ### Bidirectional Sync
 - Update Clay from Obsidian notes
 - Two-way relationship management
@@ -1025,8 +1160,6 @@ FileManager.writeContact()
 | **User Sections** | User-managed markdown sections (preserved) |
 | **YAML** | Data format for frontmatter (metadata) |
 | **Frontmatter** | YAML section at top of markdown file |
-| **TheBrain** | Knowledge graph tool by TheBrain Technologies |
-| **UnBrain** | Planned modular integration with TheBrain |
 | **Dataview** | Obsidian plugin for querying markdown metadata |
 | **CLI** | Command-line interface |
 

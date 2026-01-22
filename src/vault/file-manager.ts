@@ -12,19 +12,16 @@ export interface FileManagerConfig {
   vaultPath: string;
 }
 
-/**
- * Communities that get their own subfolders
- * Ordered by priority (first match wins if contact is in multiple)
- */
-const SPECIAL_COMMUNITIES = ['Family', 'Bitcoin', 'Arc Aspicio', 'Photography'] as const;
 
 export class VaultFileManager {
   private vaultPath: string;
   private templateEngine: TemplateEngine;
+  private groupPriority: string[]; // Loaded from config
 
   constructor(config: FileManagerConfig) {
     this.vaultPath = config.vaultPath;
     this.templateEngine = new TemplateEngine();
+    this.groupPriority = this.loadGroupPriority();
 
     // Validate vault path
     if (!fs.pathExistsSync(this.vaultPath)) {
@@ -33,54 +30,153 @@ export class VaultFileManager {
   }
 
   /**
-   * Write a contact to a markdown file in the vault
-   * Organizes into subfolders based on special communities (Family, Bitcoin, Arc Aspicio, Photography)
-   * Other contacts go in the main vault folder
-   * If file exists, overwrites it (Phase 1.2 will add intelligent merge logic)
+   * Load group priority list from config file
+   * Parses markdown list and extracts group names
    */
-  async writeContact(contact: TendContact): Promise<{ filepath: string; created: boolean }> {
-    // Generate filename
-    const filename = generateFilename(contact.name);
+  private loadGroupPriority(): string[] {
+    const configPath = path.join(__dirname, '../../config/group-priority.md');
 
-    // Determine which subfolder (if any) based on communities
-    const subfolder = this.getSubfolderForContact(contact);
-
-    // Build the directory path
-    let dirPath = this.vaultPath;
-    if (subfolder) {
-      dirPath = path.join(this.vaultPath, subfolder);
-      // Ensure subfolder exists
-      await fs.ensureDir(dirPath);
+    if (!fs.pathExistsSync(configPath)) {
+      throw new Error(`Group priority config not found: ${configPath}`);
     }
 
-    const filepath = path.join(dirPath, filename);
+    const content = fs.readFileSync(configPath, 'utf-8');
+    const lines = content.split('\n');
+    const groups: string[] = [];
 
-    // Check if file exists
-    const existed = await fs.pathExists(filepath);
+    // Parse markdown list items (lines starting with "- ")
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Skip header, empty lines, and markdown formatting
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('##')) continue;
+
+      // Match list item format: "- groupname" or "1. groupname"
+      const match = trimmed.match(/^(?:\d+\.|[\d\w]+\.|-)\s+(.+)$/);
+      if (match) {
+        const groupName = match[1].trim();
+        groups.push(groupName);
+      }
+    }
+
+    if (groups.length === 0) {
+      throw new Error('No groups found in priority config');
+    }
+
+    return groups;
+  }
+
+  /**
+   * Write a contact to a markdown file in the vault
+   * Organizes into Grouped/ and Ungrouped/ folders based on community membership
+   * If file exists, creates versioned file (e.g., Name-2.md, Name-3.md) up to -5
+   * If 5+ versions exist, throws error requiring manual resolution
+   */
+  async writeContact(contact: TendContact): Promise<{ filepath: string; created: boolean; filename: string }> {
+    // Generate base filename
+    const baseFilename = generateFilename(contact.name);
+    const baseNameWithoutExt = baseFilename.replace('.md', '');
+    const ext = '.md';
+
+    // Determine which subfolder based on group membership
+    const subfolder = this.getSubfolderForContact(contact);
+
+    // Build the directory path and ensure subfolder exists
+    const dirPath = path.join(this.vaultPath, subfolder);
+    await fs.ensureDir(dirPath);
+
+    // Find available filename (handling conflicts)
+    const { filename, filepath, existed } = await this.findAvailableFilepath(
+      dirPath,
+      baseNameWithoutExt,
+      ext
+    );
 
     // Generate markdown
     const markdown = this.templateEngine.generateMarkdown(contact);
 
-    // Write to file (creates or overwrites)
+    // Write to file
     await fs.writeFile(filepath, markdown, 'utf-8');
 
     return {
       filepath,
+      filename,
       created: !existed
     };
   }
 
   /**
-   * Determine which special community subfolder a contact belongs to
-   * Returns the first matching community in priority order, or null for main folder
+   * Find available filepath, handling version conflicts
+   * Returns the first available name: originalName.md, then originalName-2.md, etc. up to -5
+   * Throws error if all 5 versions are taken
    */
-  private getSubfolderForContact(contact: TendContact): string | null {
-    for (const community of SPECIAL_COMMUNITIES) {
-      if (contact.communities.includes(community)) {
-        return community;
+  private async findAvailableFilepath(
+    dirPath: string,
+    baseNameWithoutExt: string,
+    ext: string
+  ): Promise<{ filename: string; filepath: string; existed: boolean }> {
+    // Try base filename first
+    let filename = baseNameWithoutExt + ext;
+    let filepath = path.join(dirPath, filename);
+    let existed = await fs.pathExists(filepath);
+
+    if (!existed) {
+      return { filename, filepath, existed };
+    }
+
+    // Try versions -2 through -5
+    for (let version = 2; version <= 5; version++) {
+      filename = `${baseNameWithoutExt}-${version}${ext}`;
+      filepath = path.join(dirPath, filename);
+      existed = await fs.pathExists(filepath);
+
+      if (!existed) {
+        return { filename, filepath, existed: false };
       }
     }
-    return null;
+
+    // All versions exist - error
+    throw new Error(
+      `Too many versions of "${baseNameWithoutExt}" exist (5+ versions found). ` +
+      `Manual resolution needed. Files: ${baseNameWithoutExt}.md through ${baseNameWithoutExt}-5.md`
+    );
+  }
+
+  /**
+   * Determine which folder a contact belongs to based on group membership
+   * Returns "Grouped" if contact has communities, "Ungrouped" otherwise
+   */
+  /**
+   * Determine folder based on group priority list
+   * Algorithm: For each priority group (in order), check if contact has that group
+   * Returns FIRST MATCH from priority list, or "Ungrouped" as fallback
+   *
+   * Example:
+   * - Contact has: ["5. Wine", "2D. Acquaintance", "Arc Aspicio"]
+   * - Priority: ["O. Life Connections", "Family", "Arc Aspicio", ..., "2D. Acquaintance", ...]
+   * - Result: "Arc Aspicio" (comes first in priority list)
+   */
+  private getSubfolderForContact(contact: TendContact): string {
+    // No communities at all
+    if (!contact.communities || contact.communities.length === 0) {
+      return 'Ungrouped';
+    }
+
+    // Optimization: If only one group, use it directly (no need to check priority list)
+    if (contact.communities.length === 1) {
+      return contact.communities[0];
+    }
+
+    // Multiple groups: Check each group in the priority list (in order)
+    // This ensures we return the HIGHEST PRIORITY group the contact belongs to
+    for (const priorityGroup of this.groupPriority) {
+      if (contact.communities.includes(priorityGroup)) {
+        return priorityGroup;
+      }
+    }
+
+    // No match in priority list - fallback to Ungrouped
+    return 'Ungrouped';
   }
 
   /**

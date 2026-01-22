@@ -4,7 +4,7 @@
  */
 
 export type ContactType = 'person' | 'organization' | 'contact';
-export type ContactStatus = 'active' | 'dormant' | 'archived';
+export type ContactStatus = 'active' | 'dormant';
 export type Priority = 'high' | 'medium' | 'low';
 
 export interface TendContact {

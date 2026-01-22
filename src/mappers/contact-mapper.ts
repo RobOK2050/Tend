@@ -146,8 +146,6 @@ export class ContactMapper {
    * Infer contact status
    */
   private inferStatus(clay: ClayContact): ContactStatus {
-    if (clay.isMemorialized) return 'archived';
-
     const lastInteraction = this.parseDate(clay.interaction_history.last_date);
     if (!lastInteraction) return 'dormant';
 
@@ -155,7 +153,7 @@ export class ContactMapper {
       (Date.now() - lastInteraction.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    if (daysSinceInteraction > 365) return 'dormant';
+    if (daysSinceInteraction > 730) return 'dormant'; // 2 years
     return 'active';
   }
 
