@@ -149,15 +149,22 @@ export class ClayLocalMCPClient {
       contact_id: contactId
     });
 
+    // Debug: log response structure
+    if (!response || !response.name) {
+      console.error('[DEBUG] Response missing name field. Full response:', JSON.stringify(response).substring(0, 200));
+    }
+
     // clay-mcp returns data in content array
     if (response?.content && Array.isArray(response.content)) {
       const textContent = response.content.find((c: any) => c.type === 'text');
       if (textContent?.text) {
         try {
-          return JSON.parse(textContent.text) as ClayContact;
+          const contact = JSON.parse(textContent.text) as ClayContact;
+          if (contact && contact.name) {
+            return contact;
+          }
         } catch (error) {
           console.error('[DEBUG] Failed to parse clay-mcp getContact response:', error);
-          return response as ClayContact;
         }
       }
     }
@@ -165,11 +172,27 @@ export class ClayLocalMCPClient {
     // Handle legacy format for backwards compatibility
     if (response?.type === 'text' && response?.text) {
       try {
-        return JSON.parse(response.text) as ClayContact;
+        const contact = JSON.parse(response.text) as ClayContact;
+        if (contact && contact.name) {
+          return contact;
+        }
       } catch {
-        return response as ClayContact;
+        // Continue to fallback
       }
     }
+
+    // If response looks like it has the right structure, return it
+    if (response && response.name) {
+      return response as ClayContact;
+    }
+
+    // Fallback: try to return whatever we have
+    console.error('[DEBUG] Contact response missing required fields:', {
+      hasContent: !!response?.content,
+      hasText: !!response?.text,
+      hasName: !!response?.name,
+      keys: response ? Object.keys(response).slice(0, 10) : []
+    });
 
     return response as ClayContact;
   }

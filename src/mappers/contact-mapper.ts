@@ -16,9 +16,47 @@ import type {
 
 export class ContactMapper {
   /**
+   * Validate Clay contact has required fields
+   */
+  private validateClayContact(clay: any): clay is ClayContact {
+    if (!clay || typeof clay !== 'object') {
+      return false;
+    }
+
+    // Required fields that must exist
+    const requiredFields = ['id', 'name'];
+    for (const field of requiredFields) {
+      if (!(field in clay) || clay[field] === null || clay[field] === undefined) {
+        console.error(`[Validation] Missing required field: ${field}`);
+        return false;
+      }
+    }
+
+    // Validate field types
+    if (typeof clay.id !== 'number' && typeof clay.id !== 'string') {
+      console.error(`[Validation] Invalid clay.id type: ${typeof clay.id}`);
+      return false;
+    }
+
+    if (typeof clay.name !== 'string') {
+      console.error(`[Validation] Invalid clay.name type: ${typeof clay.name}`);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
    * Map a Clay contact to a Tend contact
    */
   mapClayToTend(clay: ClayContact): TendContact {
+    // Validate clay contact structure before mapping
+    if (!this.validateClayContact(clay)) {
+      throw new Error(
+        `Invalid Clay contact structure. Expected {id, name, ...} but got: ${JSON.stringify(clay).substring(0, 100)}`
+      );
+    }
+
     return {
       // Core Identity
       name: clay.name,
@@ -219,8 +257,11 @@ export class ContactMapper {
   private inferIndustry(workHistory: WorkHistory[]): string[] {
     const industries: string[] = [];
 
-    // Extract common industry patterns from company names
-    const companies = workHistory.map(w => w.company.toLowerCase()).join(' ');
+    // Extract common industry patterns from company names (skip null/undefined)
+    const companies = workHistory
+      .filter(w => w.company && typeof w.company === 'string')
+      .map(w => w.company.toLowerCase())
+      .join(' ');
 
     if (companies.includes('tech') || companies.includes('software') || companies.includes('google'))
       industries.push('Technology');
@@ -263,8 +304,10 @@ export class ContactMapper {
   private extractInterests(clay: ClayContact): string[] {
     const interests: string[] = [];
 
-    // Look for interest keywords in notes
-    const notesText = clay.notes.join(' ').toLowerCase();
+    // Look for interest keywords in notes (handle null/undefined)
+    const notesText = (clay.notes && Array.isArray(clay.notes))
+      ? clay.notes.join(' ').toLowerCase()
+      : '';
     if (notesText.includes('bitcoin')) interests.push('Bitcoin');
     if (notesText.includes('photography')) interests.push('Photography');
     if (notesText.includes('ai') || notesText.includes('artificial')) interests.push('AI');

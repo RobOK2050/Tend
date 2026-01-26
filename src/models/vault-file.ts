@@ -92,18 +92,26 @@ export interface DateEntry {
 
 /**
  * Configuration for system-managed vs user-managed sections
+ *
+ * Notes: Even though Notes is user-managed, it's listed as a system section
+ * so it can be positioned correctly in the new structure:
+ * - Links (system)
+ * - Separator
+ * - Notes (system but user-managed) + Date Entries
+ * - Separator
+ * - Clay Sections (Work History, Education, etc.)
  */
 export const SECTION_CONFIG = {
   systemSections: [
     'Links',
     'Contact Details',
+    'Notes',  // User-managed but positioned in system section area
     'Work History',
     'Education',
     'Interaction History',
     'Clay Notes'
   ],
   userSections: [
-    'Notes',
     'Family Notes'
   ]
 };

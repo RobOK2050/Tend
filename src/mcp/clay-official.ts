@@ -108,4 +108,11 @@ export class ClayOfficialMCPClient {
   setApiKey(apiKey: string): void {
     this.apiKey = apiKey;
   }
+
+  /**
+   * Cleanup (no-op for official client - no processes to manage)
+   */
+  async cleanup(): Promise<void> {
+    // Official client uses HTTP - no subprocess to clean up
+  }
 }

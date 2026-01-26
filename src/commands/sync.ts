@@ -71,7 +71,9 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     // Track results
     let successCount = 0;
     let errorCount = 0;
-    const results: { name: string; status: 'success' | 'error'; message: string }[] = [];
+    let createdCount = 0;
+    let mergedCount = 0;
+    const results: { name: string; status: 'success' | 'error'; message: string; created?: boolean; merged?: boolean; group?: string; communities?: string[] }[] = [];
 
     // Process each contact
     for (let i = 0; i < contactData.length; i++) {
@@ -88,22 +90,39 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
         const tendContact = mapper.mapClayToTend(clayContact);
 
         // Write to vault
+        let writeResult;
         if (!options.dryRun) {
-          const { filepath, filename, created } = await fileManager.writeContact(tendContact);
-          const relativePath = path.relative(vaultPath, filepath);
+          writeResult = await fileManager.writeContact(tendContact);
+          const relativePath = path.relative(vaultPath, writeResult.filepath);
+
+          const actionLabel = writeResult.created ? 'Created' : writeResult.merged ? 'Merged' : 'Updated';
 
           logger.logContactProcessing(
             clayContact.name,
             'success',
-            `${created ? 'Created' : 'Updated'}: ${relativePath}`
+            `${actionLabel}: ${relativePath}`
           );
 
           if (options.verbose) {
             spinner.info(
-              `✓ ${created ? 'Created' : 'Updated'}: ${relativePath}`
+              `✓ ${actionLabel}: ${relativePath}`
             );
+
+            // Show merge details in verbose mode
+            if (writeResult.merged && writeResult.preservedSections) {
+              spinner.info(
+                `  Preserved: ${writeResult.preservedSections.join(', ')}${writeResult.preservedDateEntries ? ` + ${writeResult.preservedDateEntries} date entries` : ''}`
+              );
+            }
           } else {
-            spinner.succeed(`${clayContact.name} → ${filename}`);
+            spinner.succeed(`${clayContact.name} → ${writeResult.filename}`);
+          }
+
+          // Track created vs merged
+          if (writeResult.created) {
+            createdCount++;
+          } else if (writeResult.merged) {
+            mergedCount++;
           }
         } else {
           // Dry run mode - just show what would be created
@@ -121,11 +140,18 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
           }
         }
 
+        // Extract group folder from filepath
+        const group = writeResult ? path.basename(path.dirname(writeResult.filepath)) : 'Unknown';
+
         successCount++;
         results.push({
           name: clayContact.name,
           status: 'success',
-          message: options.dryRun ? 'Would sync' : 'Synced'
+          message: options.dryRun ? 'Would sync' : 'Synced',
+          created: writeResult?.created,
+          merged: writeResult?.merged,
+          group,
+          communities: tendContact.communities || []
         });
       } catch (error) {
         errorCount++;
@@ -140,7 +166,8 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
         results.push({
           name: clayContact.name,
           status: 'error',
-          message: errorMsg
+          message: errorMsg,
+          group: 'Failed'
         });
 
         if (options.verbose) {
@@ -151,20 +178,65 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
 
     // Summary
     logger.logSummary(successCount, errorCount, contactData.length);
-    logger.logCheckpoint('Program End', `Success: ${successCount}, Failed: ${errorCount}`);
+    logger.logCheckpoint('Program End', `Success: ${successCount}, Failed: ${errorCount}, Created: ${createdCount}, Merged: ${mergedCount}`);
 
     console.log();
     console.log(chalk.blue('Summary:'));
-    console.log(chalk.green(`✓ Synced: ${successCount}`));
+    console.log(chalk.green(`✓ Synced: ${successCount}${createdCount > 0 || mergedCount > 0 ? ` (${createdCount} created, ${mergedCount} merged)` : ''}`));
     if (errorCount > 0) {
       console.log(chalk.red(`✗ Failed: ${errorCount}`));
     }
     console.log(chalk.gray(`Log file: ${logger.getLogFilePath()}`));
     console.log();
 
-    // Show errors if verbose
+    // Print detailed contact status summary
+    if (results.length > 0 && options.verbose) {
+      console.log(chalk.blue('Contact Status Summary:'));
+
+      // Calculate column widths
+      const maxNameLength = Math.max(
+        ...results.map(r => r.name.length),
+        4 // "Name" header
+      );
+      const statusWidth = 10; // "✓ Success" or "✗ Failed"
+      const communitiesWidth = 40; // Communities column
+
+      const totalWidth = maxNameLength + statusWidth + communitiesWidth + 8; // 8 for separators
+      console.log('─'.repeat(Math.min(totalWidth, 140)));
+
+      // Print header
+      const header = `${'Name'.padEnd(maxNameLength)} | ${'Status'.padEnd(statusWidth)} | Communities`;
+      console.log(header);
+      console.log('─'.repeat(Math.min(totalWidth, 140)));
+
+      // Print each contact
+      results.forEach(r => {
+        const statusIcon = r.status === 'success' ? '✓' : '✗';
+        const statusLabel = r.status === 'success'
+          ? (r.merged ? 'Merged' : r.created ? 'Created' : 'Updated')
+          : 'Failed';
+        const statusDisplay = `${statusIcon} ${statusLabel}`.padEnd(statusWidth);
+        const communitiesDisplay = r.communities && r.communities.length > 0
+          ? r.communities.join(', ')
+          : 'Ungrouped';
+
+        const line = `${r.name.padEnd(maxNameLength)} | ${statusDisplay} | ${communitiesDisplay}`;
+
+        // Color code by status
+        if (r.status === 'success') {
+          console.log(chalk.green(line));
+        } else {
+          console.log(chalk.red(line));
+        }
+      });
+
+      console.log('─'.repeat(Math.min(totalWidth, 140)));
+      console.log();
+    }
+
+    // Show error details
     if (options.verbose && errorCount > 0) {
-      console.log(chalk.yellow('Failed contacts:'));
+      console.log(chalk.yellow('Failed contact details:'));
       results
         .filter(r => r.status === 'error')
         .forEach(r => {
@@ -229,24 +301,24 @@ async function getContactData(options: SyncOptions, logger: TendLogger): Promise
 
   // Mode 3: Single name (uses Clay MCP for real data)
   if (options.name) {
+    logger.logCheckpoint('MCP Initialization', `Strategy: ${options.mcp || 'local'}`);
+
+    // Use factory pattern with selected strategy (default: official)
+    const { MCPClientFactory } = await import('../mcp/client');
+    const strategy = options.mcp || 'local';
+
+    let mcpClient;
+    if (strategy === 'local') {
+      // For local strategy, create directly with API key support
+      const { ClayLocalMCPClient } = await import('../mcp/clay-local');
+      const apiKey = process.env.CLAY_API_KEY;
+      mcpClient = new ClayLocalMCPClient(apiKey);
+    } else {
+      // For official strategy, use factory
+      mcpClient = MCPClientFactory.createClient(strategy);
+    }
+
     try {
-      logger.logCheckpoint('MCP Initialization', `Strategy: ${options.mcp || 'local'}`);
-
-      // Use factory pattern with selected strategy (default: official)
-      const { MCPClientFactory } = await import('../mcp/client');
-      const strategy = options.mcp || 'local';
-
-      let mcpClient;
-      if (strategy === 'local') {
-        // For local strategy, create directly with API key support
-        const { ClayLocalMCPClient } = await import('../mcp/clay-local');
-        const apiKey = process.env.CLAY_API_KEY;
-        mcpClient = new ClayLocalMCPClient(apiKey);
-      } else {
-        // For official strategy, use factory
-        mcpClient = MCPClientFactory.createClient(strategy);
-      }
-
       logger.logMCPCall('searchContacts', { query: options.name, limit: 1 });
       const searchResult = await mcpClient.searchContacts({
         query: options.name,
@@ -276,6 +348,9 @@ async function getContactData(options: SyncOptions, logger: TendLogger): Promise
         `2. Or use --input <file> with a list of contact names\n` +
         `3. Make sure CLAY_API_KEY environment variable is set`
       );
+    } finally {
+      // Clean up MCP process
+      await mcpClient.cleanup();
     }
   }
 
@@ -339,36 +414,41 @@ async function processTextFile(options: SyncOptions, logger: TendLogger): Promis
   }
 
   // Process each name
-  for (const name of namesToProcess) {
-    try {
-      logger.logMCPCall('searchContacts', { query: name, limit: 1 });
-      const searchResult = await mcpClient.searchContacts({
-        query: name,
-        limit: 1
-      });
-      logger.logMCPResult('searchContacts', searchResult.results.length);
+  try {
+    for (const name of namesToProcess) {
+      try {
+        logger.logMCPCall('searchContacts', { query: name, limit: 1 });
+        const searchResult = await mcpClient.searchContacts({
+          query: name,
+          limit: 1
+        });
+        logger.logMCPResult('searchContacts', searchResult.results.length);
 
-      if (searchResult.results.length === 0) {
-        console.log(chalk.yellow(`⚠️  Contact not found in Clay: ${name}`));
-        logger.logCheckpoint('⚠️  Contact Not Found', `Name: ${name}`);
-        continue;
+        if (searchResult.results.length === 0) {
+          console.log(chalk.yellow(`⚠️  Contact not found in Clay: ${name}`));
+          logger.logCheckpoint('⚠️  Contact Not Found', `Name: ${name}`);
+          continue;
+        }
+
+        const contactId = searchResult.results[0].id;
+        logger.logMCPCall('getContact', { contact_id: contactId });
+        const contact = await mcpClient.getContact(contactId);
+        logger.logMCPResult('getContact', 1);
+
+        contacts.push(contact);
+
+        // Rate limiting: 100ms delay between API calls
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error(chalk.red(`✗ Error fetching ${name}: ${message}`));
+        logger.logCheckpoint('✗ MCP Error', `Contact: ${name}, Error: ${message}`);
       }
-
-      const contactId = searchResult.results[0].id;
-      logger.logMCPCall('getContact', { contact_id: contactId });
-      const contact = await mcpClient.getContact(contactId);
-      logger.logMCPResult('getContact', 1);
-
-      contacts.push(contact);
-
-      // Rate limiting: 100ms delay between API calls
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      console.error(chalk.red(`✗ Error fetching ${name}: ${message}`));
-      logger.logCheckpoint('✗ MCP Error', `Contact: ${name}, Error: ${message}`);
     }
+  } finally {
+    // Clean up MCP process
+    await mcpClient.cleanup();
   }
 
   logger.logCheckpoint('Input File Processing Complete', `Retrieved ${contacts.length} contacts`);
@@ -530,40 +610,64 @@ async function processCSVFile(options: SyncOptions, logger: TendLogger): Promise
   const mcpClient = new ClayLocalMCPClient(apiKey);
 
   // 8. Process each row
-  for (const row of batch) {
-    const displayName = `${row.FirstName} ${row.LastName}`.trim() || `Contact ${row.Sequence}`;
+  try {
+    for (const row of batch) {
+      const displayName = `${row.FirstName} ${row.LastName}`.trim() || `Contact ${row.Sequence}`;
 
-    try {
-      logger.logMCPCall('getContact', { contact_id: row.ClayID });
+      try {
+        logger.logMCPCall('getContact', { contact_id: row.ClayID });
 
-      // Fetch contact by Clay ID (direct lookup, no search needed!)
-      const contact = await mcpClient.getContact(row.ClayID);
+        // Fetch contact by Clay ID (direct lookup, no search needed!)
+        const contact = await mcpClient.getContact(row.ClayID);
 
-      logger.logMCPResult('getContact', 1);
+        logger.logMCPResult('getContact', 1);
 
-      // Add groups from CSV to the contact (override Clay's empty groups)
-      if (row.Groups && row.Groups.length > 0) {
-        contact.groups = row.Groups;
+        // Add groups from CSV to the contact (override Clay's empty groups)
+        if (row.Groups && row.Groups.length > 0) {
+          contact.groups = row.Groups;
+        }
+
+        contacts.push(contact);
+
+        // Update checkpoint after successful processing
+        await checkpointMgr.updateCheckpoint(row.Sequence);
+        logger.logCheckpoint('Checkpoint Updated', `Sequence: ${row.Sequence}`);
+
+        // Rate limiting: 100ms delay
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error(chalk.red(`✗ Error fetching ${displayName} (Seq ${row.Sequence}): ${message}`));
+        logger.logCheckpoint('✗ MCP Error', `Sequence: ${row.Sequence}, Error: ${message}`);
+
+        // Don't update checkpoint on error - allows resume from this point
       }
-
-      contacts.push(contact);
-
-      // Update checkpoint after successful processing
-      await checkpointMgr.updateCheckpoint(row.Sequence);
-      logger.logCheckpoint('Checkpoint Updated', `Sequence: ${row.Sequence}`);
-
-      // Rate limiting: 100ms delay
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      console.error(chalk.red(`✗ Error fetching ${displayName} (Seq ${row.Sequence}): ${message}`));
-      logger.logCheckpoint('✗ MCP Error', `Sequence: ${row.Sequence}, Error: ${message}`);
-
-      // Don't update checkpoint on error - allows resume from this point
     }
+  } finally {
+    // Clean up MCP process
+    await mcpClient.cleanup();
   }
 
-  logger.logCheckpoint('CSV Processing Complete', `Retrieved ${contacts.length} contacts`);
-  return contacts;
+  // Validate all contacts have required fields before returning
+  const invalidContacts: any[] = [];
+  const validContacts = contacts.filter((contact) => {
+    if (!contact || !contact.name) {
+      invalidContacts.push({
+        id: contact?.id || 'unknown',
+        name: contact?.name || '(empty)',
+        displayName: contact?.displayName || '(none)'
+      });
+      console.warn(chalk.yellow(`⚠️  Skipping invalid contact: ID ${contact?.id}, displayName: "${contact?.displayName || '(empty)'}"`));
+      return false;
+    }
+    return true;
+  });
+
+  if (invalidContacts.length > 0) {
+    logger.logCheckpoint('⚠️  Invalid Contacts Filtered', `${invalidContacts.length} contact(s) had missing/null name field: ${invalidContacts.map(c => `ID ${c.id} (${c.displayName})`).join(', ')}`);
+  }
+
+  logger.logCheckpoint('CSV Processing Complete', `Retrieved ${validContacts.length} valid contacts (${contacts.length} total, ${invalidContacts.length} filtered)`);
+  return validContacts;
 }

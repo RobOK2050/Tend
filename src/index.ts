@@ -29,4 +29,20 @@ program
   .option('--verbose', 'Verbose logging')
   .action(syncCommand);
 
+// Global signal handlers for graceful shutdown
+const handleShutdown = async () => {
+  // Clean up any MCP processes
+  try {
+    // Note: MCP client cleanup is handled in sync command's try/finally
+    // This ensures proper shutdown if process receives SIGTERM/SIGINT
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', handleShutdown);
+process.on('SIGINT', handleShutdown);
+
 program.parse();

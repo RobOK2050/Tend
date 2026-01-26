@@ -7,6 +7,14 @@ import type { TendContact } from '../models/tend-contact';
 export class BodySectionGenerator {
   /**
    * Generate all body sections for a contact
+   *
+   * Structure:
+   * 1. Professional header
+   * 2. Links
+   * 3. Separator (---)
+   * 4. Notes section (user-managed, with subsections and date entries)
+   * 5. Separator (---)
+   * 6. Clay sections (Work History, Education, Interaction History, Clay Notes)
    */
   generateBody(contact: TendContact): string {
     const sections: string[] = [];
@@ -20,8 +28,14 @@ export class BodySectionGenerator {
     // Contact information links (including Clay app link)
     sections.push(this.generateContactLinksSection(contact));
 
-    // Notes section (user-managed, appears early, new notes added at top)
+    // Horizontal rule to separate links from Notes
+    sections.push('---');
+
+    // Notes section (user-managed, appears at top, can have subsections)
     sections.push(this.generateNotesSection());
+
+    // Horizontal rule to separate user content from Clay sections
+    sections.push('---\n');
 
     // Work History section (if exists)
     if (contact.workHistory.length > 0) {
@@ -40,12 +54,6 @@ export class BodySectionGenerator {
     if (contact.clayNotes.length > 0) {
       sections.push(this.generateClayNotesSection(contact));
     }
-
-    // Horizontal rule to separate system sections from user sections
-    sections.push('---\n');
-
-    // Family Notes section (user-managed)
-    sections.push(this.generateUserSection('Family Notes'));
 
     return sections.join('\n\n');
   }
