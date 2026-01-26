@@ -624,7 +624,7 @@ async function processCSVFile(options: SyncOptions, logger: TendLogger): Promise
 
         // Add groups from CSV to the contact (override Clay's empty groups)
         if (row.Groups && row.Groups.length > 0) {
-          contact.communities = row.Groups;
+          contact.groups = row.Groups;
         }
 
         contacts.push(contact);
