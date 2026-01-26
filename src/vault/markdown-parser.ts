@@ -114,8 +114,10 @@ export class MarkdownParser {
     let preambleContent: string[] = []; // Content before any section header
 
     for (const line of lines) {
-      // Match headers: ## through #### (2-4 hashes)
-      const headerMatch = line.match(/^(#{2,4})\s+(.+)$/);
+      // Match headers: ## (2 hashes) and #### (4 hashes) only
+      // Skip ### (3 hashes) - these are subsections within parent sections
+      // This allows hierarchical structure: ## Section > ### Subsection > content
+      const headerMatch = line.match(/^(##|####)\s+(.+)$/);
 
       if (headerMatch) {
         // Save previous section

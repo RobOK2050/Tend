@@ -255,7 +255,7 @@ Content with surrounding whitespace
   });
 
   describe('parse - section levels', () => {
-    it('should preserve heading levels (## vs ###)', () => {
+    it('should treat ### as subsections within ## sections', () => {
       const markdown = `---
 name: Test
 ---
@@ -266,15 +266,21 @@ Content
 
 ### Level 3
 
-Content`;
+This is a subsection within Level 2, not a separate section`;
 
       const result = parser.parse(markdown);
 
-      const level2 = result.userSections.find(s => s.heading === 'Level 2');
-      const level3 = result.userSections.find(s => s.heading === 'Level 3');
-
+      // Only Level 2 is parsed as a section
+      const level2 = result.userSections.find((s: any) => s.heading === 'Level 2');
       expect(level2?.level).toBe(2);
-      expect(level3?.level).toBe(3);
+
+      // Level 3 is NOT a separate section, but part of Level 2 content
+      const level3 = result.userSections.find((s: any) => s.heading === 'Level 3');
+      expect(level3).toBeUndefined();
+
+      // Verify Level 2 content includes the Level 3 subsection
+      expect(level2?.content).toContain('### Level 3');
+      expect(level2?.content).toContain('subsection within');
     });
 
     it('should detect level 4 headings for date entries', () => {
