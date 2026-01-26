@@ -414,23 +414,19 @@ Work content`);
         .filter(i => i > yamlEnd + 1);
 
       expect(yamlEnd).toBeGreaterThan(0);
-      expect(separators.length).toBeGreaterThanOrEqual(2);
+      // Now only 1 separator (before Clay sections), not between Links and Notes
+      expect(separators.length).toBeGreaterThanOrEqual(1);
 
-      const sep1 = separators[0]; // After links
-      const sep2 = separators[1]; // After notes/dates
+      const claySeparator = separators[0]; // Before Clay sections
 
-      // Links should come before first separator
-      const linksIndex = lines.findIndex(l => l.includes('## Links'));
-      expect(linksIndex).toBeLessThan(sep1);
-
-      // Notes should come between separators
+      // Notes should come before Clay separator
       const notesIndex = lines.findIndex(l => l.includes('## Notes'));
-      expect(notesIndex).toBeGreaterThan(sep1);
-      expect(notesIndex).toBeLessThan(sep2);
+      expect(notesIndex).toBeGreaterThan(yamlEnd);
+      expect(notesIndex).toBeLessThan(claySeparator);
 
-      // Work History should come after second separator
+      // Work History should come after separator
       const workIndex = lines.findIndex(l => l.includes('## Work History'));
-      expect(workIndex).toBeGreaterThan(sep2);
+      expect(workIndex).toBeGreaterThan(claySeparator);
     });
 
     it('should return merge metadata', () => {

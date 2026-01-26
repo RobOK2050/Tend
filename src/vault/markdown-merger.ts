@@ -117,13 +117,19 @@ export class MarkdownMerger {
 
     // SPECIAL HANDLING: Communities - combine instead of replace
     // Merge: existing communities + fresh communities (deduplicated)
-    const existingCommunities = (existing.communities || []) as string[];
-    const freshCommunities = (fresh.communities || []) as string[];
+    let existingCommunities = (existing.communities || []) as string[];
+    let freshCommunities = (fresh.communities || []) as string[];
+
+    // Unwrap any existing wikilinks ([[Community]]) for comparison
+    existingCommunities = existingCommunities.map((c: string) => c.replace(/^\[\[/, '').replace(/\]\]$/, ''));
+    freshCommunities = freshCommunities.map((c: string) => c.replace(/^\[\[/, '').replace(/\]\]$/, ''));
 
     // Combine and deduplicate
     const allCommunities = [...new Set([...existingCommunities, ...freshCommunities])];
+
+    // Wrap in wikilinks for Obsidian clickability
     if (allCommunities.length > 0) {
-      merged.communities = allCommunities;
+      merged.communities = allCommunities.map((c: string) => `[[${c}]]`);
     }
 
     return merged;
@@ -173,10 +179,6 @@ export class MarkdownMerger {
       lines.push(linksSection.content);
       lines.push('');
     }
-
-    // 3. Separator before user content
-    lines.push('---');
-    lines.push('');
 
     // 4. Notes section - user-managed (can have subsections with ###)
     const notesSection = systemSectionMap.get('Notes');
