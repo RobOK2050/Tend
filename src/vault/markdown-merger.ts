@@ -168,7 +168,6 @@ export class MarkdownMerger {
     lines.push('---');
     lines.push(yamlString.trim());
     lines.push('---');
-    lines.push('');
 
     // 2. Links section (before separator)
     const systemSectionMap = new Map(systemSections.map(s => [s.heading, s]));
@@ -180,7 +179,7 @@ export class MarkdownMerger {
       lines.push('');
     }
 
-    // 4. Notes section - user-managed (can have subsections with ###)
+    // 3. Notes section - user-managed (can have subsections with ###)
     const notesSection = systemSectionMap.get('Notes');
     if (notesSection) {
       lines.push(`${'#'.repeat(notesSection.level)} ${notesSection.heading}`);
