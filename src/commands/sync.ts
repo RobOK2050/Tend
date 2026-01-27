@@ -144,6 +144,13 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
         const group = writeResult ? path.basename(path.dirname(writeResult.filepath)) : 'Unknown';
 
         successCount++;
+        // Use CSV groups if available (what was provided to sync), otherwise use merged communities
+        const displayCommunities = (clayContact.groups && clayContact.groups.length > 0)
+          ? clayContact.groups
+          : (tendContact.communities && tendContact.communities.length > 0
+              ? tendContact.communities.map((c: string) => c.replace(/^\[\[/, '').replace(/\]\]$/, ''))
+              : []);
+
         results.push({
           name: clayContact.name,
           status: 'success',
@@ -151,7 +158,7 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
           created: writeResult?.created,
           merged: writeResult?.merged,
           group,
-          communities: tendContact.communities || []
+          communities: displayCommunities
         });
       } catch (error) {
         errorCount++;
