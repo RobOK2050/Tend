@@ -39,9 +39,10 @@ export interface Frontmatter {
   industry?: string[];
 
   // Personal
+  bio?: string;
+  birthday?: string; // ISO date
   interests?: string[];
   valuesAlignment?: string[];
-  birthday?: string; // ISO date
 
   // Source References
   clayUrl?: string;

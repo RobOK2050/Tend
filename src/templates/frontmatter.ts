@@ -52,11 +52,12 @@ export class FrontmatterGenerator {
       ...(contact.industry.length > 0 && { industry: contact.industry }),
 
       // Personal
+      ...(contact.bio && { bio: contact.bio }),
+      ...(contact.birthday && { birthday: this.formatDate(contact.birthday) }),
       ...(contact.interests.length > 0 && { interests: contact.interests }),
       ...(contact.valuesAlignment.length > 0 && {
         valuesAlignment: contact.valuesAlignment
       }),
-      ...(contact.birthday && { birthday: this.formatDate(contact.birthday) }),
 
       // Source References
       clayUrl: contact.clayUrl,
