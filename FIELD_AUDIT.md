@@ -49,7 +49,6 @@ These fields are always output if they have values:
 These fields are now output when they have values:
 
 **Personal Info**
-- ✓ `bio` - Biography/headline [**NOW INCLUDED**]
 - ✓ `birthday` - Birth date (shows month/day only)
 - ✓ `interests[]` - Extracted from Clay notes by keyword
 - ✓ `valuesAlignment[]` - User-managed field (preserved across syncs)
@@ -92,38 +91,21 @@ These are rendered as markdown sections:
 **Clay Notes**
 - ✓ Notes from Clay API
 
-## What Was Wrong
+## Bio Field Location
 
-### Before
-```yaml
----
-name: Thomas Maybank
-clayId: 45241433
-# bio MISSING ← THIS WAS THE BUG
-email: [...]
----
+Bio is **NOT in YAML frontmatter** - it's displayed in the **body markdown header** (italicized, first line after name):
+
+```markdown
+# Thomas Maybank
+
+*Real Estate Agent - biography or headline here*
+
+**Real Estate Agent** @ The Ussery Group, Charter One Realty
 ```
 
-### After
-```yaml
----
-name: Thomas Maybank
-clayId: 45241433
-bio: "Biography from Clay (if present)"  ← NOW INCLUDED
-email: [...]
----
-```
+This is the correct and natural location for bio. It appears prominently where users see it first.
 
-## Implementation
-
-**File Changes:**
-1. `src/models/vault-file.ts` - Added `bio` to Frontmatter interface
-2. `src/templates/frontmatter.ts` - Added bio to YAML output
-
-**Preserved During Merges:**
-- Non-Clay fields stay in YAML (user customizations)
-- Communities are combined, not replaced
-- Bio updates from Clay data only if it's not a user-customized field
+**No YAML duplication needed** - keeps the frontmatter clean and focused on metadata.
 
 ## Testing
 
@@ -133,7 +115,7 @@ email: [...]
 
 ## Notes
 
-- Some Clay contacts may not have bio data (returns `null` from API)
-- Bio appears in markdown body header when present
+- Bio is displayed in the markdown body header (italicized), not in YAML
+- Some Clay contacts may not have bio data (returns `null` from API) - if null, no bio line shown
 - Other fields like `interests` are extracted from Clay notes by keyword matching
 - User-managed fields like `nextFollowup`, `valuesAlignment`, `priority` are preserved during merge

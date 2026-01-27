@@ -39,7 +39,6 @@ export interface Frontmatter {
   industry?: string[];
 
   // Personal
-  bio?: string;
   birthday?: string; // ISO date
   interests?: string[];
   valuesAlignment?: string[];
