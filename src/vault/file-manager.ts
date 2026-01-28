@@ -146,13 +146,33 @@ export class VaultFileManager {
       // Merge: fresh system sections + preserved user sections + preserved date entries + preserve all YAML properties
       const mergeResult = this.merger.merge(existingParsed, freshParsed);
 
-      // Write merged content
+      // If file is being updated (merged), move old version to zReview folder with timestamp
+      if (targetPath === existingPath) {
+        const reviewFolder = path.join(this.vaultPath, '..', 'zReview');
+        await fs.ensureDir(reviewFolder);
+
+        // Generate timestamp suffix: YYYYMMDD-HHMM
+        const now = new Date();
+        const timestamp = now.getFullYear().toString() +
+          String(now.getMonth() + 1).padStart(2, '0') +
+          String(now.getDate()).padStart(2, '0') +
+          '-' +
+          String(now.getHours()).padStart(2, '0') +
+          String(now.getMinutes()).padStart(2, '0');
+
+        const oldFileName = baseFilename.replace('.md', `-${timestamp}.md`);
+        const reviewPath = path.join(reviewFolder, oldFileName);
+
+        // Move existing file to zReview
+        await fs.move(existingPath, reviewPath, { overwrite: true });
+      }
+
+      // Write merged content to original location
       await fs.writeFile(targetPath, mergeResult.markdown, 'utf-8');
 
-      // Update cache if path changed (shouldn't happen now since all in same folder)
+      // Update cache if path changed
       if (targetPath !== existingPath) {
         delete this.clayIdCache[contact.clayId];
-        await fs.remove(existingPath);
         await this.updateCache(contact.clayId, targetPath);
       }
 
@@ -166,10 +186,23 @@ export class VaultFileManager {
         updatedSections: mergeResult.updatedSections
       };
     } catch (error) {
-      // If merge fails (malformed file, parsing error), create backup and write fresh
-      const backupPath = `${existingPath}.backup-${Date.now()}`;
-      await fs.copy(existingPath, backupPath);
-      await fs.remove(existingPath);
+      // If merge fails (malformed file, parsing error), move to zReview and write fresh
+      const reviewFolder = path.join(this.vaultPath, '..', 'zReview');
+      await fs.ensureDir(reviewFolder);
+
+      // Generate timestamp suffix: YYYYMMDD-HHMM
+      const now = new Date();
+      const timestamp = now.getFullYear().toString() +
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0') +
+        '-' +
+        String(now.getHours()).padStart(2, '0') +
+        String(now.getMinutes()).padStart(2, '0');
+
+      const backupFileName = baseFilename.replace('.md', `-${timestamp}-ERROR.md`);
+      const backupPath = path.join(reviewFolder, backupFileName);
+
+      await fs.move(existingPath, backupPath, { overwrite: true });
 
       // Ensure /40 People/ directory exists
       await fs.ensureDir(this.contactsFolder);
