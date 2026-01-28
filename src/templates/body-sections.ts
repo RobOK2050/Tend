@@ -32,7 +32,7 @@ export class BodySectionGenerator {
     sections.push('---');
 
     // Notes section (user-managed, appears at top, can have subsections)
-    sections.push(this.generateNotesSection());
+    sections.push(this.generateNotesSection(contact));
 
     // Horizontal rule to separate user content from Clay sections
     sections.push('---\n');
@@ -147,9 +147,17 @@ export class BodySectionGenerator {
    * Generate Notes section (user-managed, new notes added at top)
    * Format: #note content (YYYY-MM-DD)
    */
-  private generateNotesSection(): string {
+  private generateNotesSection(contact: TendContact): string {
     const today = new Date().toISOString().split('T')[0];
-    return `## Notes\n\n#note extracted from Clay (${today})`;
+    let content = `## Notes\n\n`;
+
+    // Add credentials if present
+    if (contact.credentials) {
+      content += `**Credentials:** ${contact.credentials}\n\n`;
+    }
+
+    content += `#note extracted from Clay (${today})`;
+    return content;
   }
 
   /**

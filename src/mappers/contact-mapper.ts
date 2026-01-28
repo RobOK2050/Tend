@@ -2,6 +2,7 @@
  * Contact Mapper - transforms Clay contact data to Tend's normalized format
  */
 
+import { extractCredentials } from '../utils/file-naming';
 import type { ClayContact, WorkHistory, EducationHistory } from '../models/clay-contact';
 import type {
   TendContact,
@@ -57,9 +58,13 @@ export class ContactMapper {
       );
     }
 
+    // Extract credentials from name (e.g., "AIA, NCARB")
+    const { baseName, credentials } = extractCredentials(clay.name);
+
     return {
       // Core Identity
-      name: clay.name,
+      name: baseName,
+      credentials: credentials || undefined,
       displayName: clay.displayName !== clay.name ? clay.displayName : undefined,
       type: this.inferContactType(clay),
       id: String(clay.id),

@@ -42,7 +42,10 @@ Automatically generated status table of all synced contacts.
       ? entry.communities.join(', ')
       : '—';
 
-    const row = `| ${this.escapeMarkdown(entry.name)} | ${entry.status} | ${this.escapeMarkdown(communitiesStr)} |\n`;
+    // Wrap name in [[wikilinks]] for Obsidian clickability
+    const nameLink = `[[${entry.name}]]`;
+
+    const row = `| ${nameLink} | ${entry.status} | ${this.escapeMarkdown(communitiesStr)} |\n`;
 
     fs.appendFileSync(this.statusFilePath, row, 'utf-8');
   }

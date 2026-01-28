@@ -10,6 +10,7 @@ export type Priority = 'high' | 'medium' | 'low';
 export interface TendContact {
   // Core Identity
   name: string;
+  credentials?: string; // Professional credentials (AIA, NCARB, PhD, etc.)
   displayName?: string;
   type: ContactType;
   id: string; // String version of Clay ID

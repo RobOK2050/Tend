@@ -32,10 +32,30 @@ export function sanitizeFilename(name: string): string {
 }
 
 /**
- * Generate a markdown filename from a contact name
+ * Extract credentials from a name (e.g., "AIA, NCARB" from "Evan Goodwin, AIA, NCARB")
+ * Returns { baseName, credentials }
+ */
+export function extractCredentials(fullName: string): { baseName: string; credentials: string } {
+  // Pattern: look for comma followed by uppercase letters/periods/commas
+  // Also handles parenthetical credentials like (OJP)
+  const credentialPattern = /,\s*([A-Z][A-Z\s,.-]*(?:\([^)]+\))?)$/;
+  const match = fullName.match(credentialPattern);
+
+  if (match) {
+    const baseName = fullName.substring(0, match.index).trim();
+    const credentials = match[1].trim();
+    return { baseName, credentials };
+  }
+
+  return { baseName: fullName, credentials: '' };
+}
+
+/**
+ * Generate a markdown filename from a contact name (strips credentials)
  */
 export function generateFilename(contactName: string): string {
-  const sanitized = sanitizeFilename(contactName);
+  const { baseName } = extractCredentials(contactName);
+  const sanitized = sanitizeFilename(baseName);
   return `${sanitized}.md`;
 }
 
