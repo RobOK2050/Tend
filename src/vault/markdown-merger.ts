@@ -132,7 +132,50 @@ export class MarkdownMerger {
       merged.communities = allCommunities.map((c: string) => `[[${c}]]`);
     }
 
+    // SPECIAL HANDLING: Normalize date fields to YYYY-MM-DD format
+    // This ensures dates from merges or imports are consistently formatted
+    const dateFields = ['birthday', 'lastContact', 'nextFollowup', 'created', 'updated', 'clayCreated'];
+    for (const field of dateFields) {
+      if (merged[field]) {
+        merged[field] = this.normalizeDateFormat(merged[field]);
+      }
+    }
+
     return merged;
+  }
+
+  /**
+   * Normalize date format to YYYY-MM-DD
+   * Handles ISO strings, Date objects, and already-formatted strings
+   */
+  private normalizeDateFormat(dateValue: any): string {
+    if (!dateValue) return '';
+
+    // If it's already a string in YYYY-MM-DD format, return as-is
+    if (typeof dateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+      return dateValue;
+    }
+
+    // If it's an ISO string, extract the date part
+    if (typeof dateValue === 'string' && dateValue.includes('T')) {
+      return dateValue.split('T')[0];
+    }
+
+    // If it's a Date object, format it
+    if (dateValue instanceof Date) {
+      return dateValue.toISOString().split('T')[0];
+    }
+
+    // If it's a string, try to parse it
+    if (typeof dateValue === 'string') {
+      const parsed = new Date(dateValue);
+      if (!isNaN(parsed.getTime())) {
+        return parsed.toISOString().split('T')[0];
+      }
+    }
+
+    // Fallback - return as string
+    return String(dateValue);
   }
 
   /**
