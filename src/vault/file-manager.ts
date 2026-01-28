@@ -224,27 +224,28 @@ export class VaultFileManager {
   }
 
   /**
-   * Find existing file - PRIMARY: by clayId
+   * Find existing file - PRIMARY: by NAME
    *
-   * Uses clayId as primary identifier (most reliable):
-   * - Handles name changes in Clay/LinkedIn
-   * - Works with CSV batch imports (matched by ID)
-   * - Prevents duplicate files when contact is renamed
+   * Uses contact name as primary identifier:
+   * - Matches files from TheBrain, manual entries, and other sources
+   * - Merges Clay data INTO existing vault files
+   * - Works with files that don't have clayId yet
+   * - Fallback to clayId for files already synced
    */
   private async findExistingFile(contact: TendContact): Promise<string | null> {
-    // Search by clayId in frontmatter (source of truth)
-    // This is the most reliable method - contact name can change, but ID doesn't
+    // PRIMARY: Search by name in /40 People/ folder
+    // This finds existing files from TheBrain and other sources
+    const baseFilename = generateFilename(contact.name);
+    const nameBasedPath = path.join(this.contactsFolder, baseFilename);
+    if (await fs.pathExists(nameBasedPath)) {
+      return nameBasedPath;
+    }
+
+    // FALLBACK: Search by clayId in frontmatter
+    // Handles cases where contact was renamed in Clay after initial sync
     const fileByClayId = await this.findFileByClayId(contact.clayId);
     if (fileByClayId) {
       return fileByClayId;
-    }
-
-    // FALLBACK: Search by name in /40 People/ folder
-    // Handles contacts created before clayId implementation
-    const baseFilename = generateFilename(contact.name);
-    const fallbackPath = path.join(this.contactsFolder, baseFilename);
-    if (await fs.pathExists(fallbackPath)) {
-      return fallbackPath;
     }
 
     return null;
