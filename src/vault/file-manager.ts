@@ -40,7 +40,7 @@ export class VaultFileManager {
 
   constructor(config: FileManagerConfig) {
     this.vaultPath = config.vaultPath;
-    this.contactsFolder = path.join(this.vaultPath, '40 People');
+    this.contactsFolder = this.vaultPath;
     this.cacheFilePath = path.join(this.vaultPath, '.clayid-cache.json');
     this.templateEngine = new TemplateEngine();
     this.parser = new MarkdownParser();
