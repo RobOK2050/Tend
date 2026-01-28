@@ -24,19 +24,32 @@ export class TendLogger {
   }
 
   /**
-   * Initialize log file with header
+   * Initialize log file with header (append if exists, create if not)
    */
   private initializeLog(): void {
-    const header = `# Tend Sync Log
+    const sessionHeader = `
+
+---
+
+## Session: ${this.formatTimestamp(new Date())}
+
+`;
+
+    // If file doesn't exist, create it with main header
+    if (!fs.pathExistsSync(this.logFilePath)) {
+      const header = `# Tend Sync Log
 
 Generated at: ${this.formatTimestamp(new Date())}
 
 ---
 
 ## Execution Checkpoints
-
-`;
-    fs.writeFileSync(this.logFilePath, header, 'utf-8');
+${sessionHeader}`;
+      fs.writeFileSync(this.logFilePath, header, 'utf-8');
+    } else {
+      // File exists, append new session header
+      fs.appendFileSync(this.logFilePath, sessionHeader, 'utf-8');
+    }
   }
 
   /**
