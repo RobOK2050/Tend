@@ -9,6 +9,7 @@ import ora from 'ora';
 import { ContactMapper } from '../mappers/contact-mapper';
 import { VaultFileManager } from '../vault/file-manager';
 import { TendLogger } from '../utils/logger';
+import { StatusTracker } from '../utils/status-tracker';
 import type { ClayContact } from '../models/clay-contact';
 
 interface SyncOptions {
@@ -64,8 +65,9 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     logger.logCheckpoint('Data Fetching Complete', `Retrieved ${contactData.length} contact(s)`);
     logger.logCheckpoint('Data Processing Start', 'Beginning contact transformation and vault writing');
 
-    // Initialize file manager
+    // Initialize file manager and status tracker
     const fileManager = new VaultFileManager({ vaultPath });
+    const statusTracker = new StatusTracker(vaultPath);
     const mapper = new ContactMapper();
 
     // Track results
@@ -124,6 +126,13 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
           } else if (writeResult.merged) {
             mergedCount++;
           }
+
+          // Add to status file
+          statusTracker.addEntry({
+            name: clayContact.name,
+            status: writeResult.created ? 'Created' : 'Updated',
+            communities: clayContact.groups || []
+          });
         } else {
           // Dry run mode - just show what would be created
           const filename = clayContact.name + '.md';
