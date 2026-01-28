@@ -90,15 +90,6 @@ export class BodySectionGenerator {
       content += roleAndLocation.join(' · ') + '\n\n';
     }
 
-    // Birthday in light/muted font
-    if (contact.birthday) {
-      const monthDay = contact.birthday.toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric'
-      });
-      content += `_Birthday: ${monthDay}_`;
-    }
-
     return content;
   }
 
