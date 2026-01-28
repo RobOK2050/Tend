@@ -192,6 +192,9 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
       }
     }
 
+    // Finalize status tracker - writes all entries as new session at top of Tend-status.md
+    statusTracker.finalizeSession();
+
     // Summary
     logger.logSummary(successCount, errorCount, contactData.length);
     logger.logCheckpoint('Program End', `Success: ${successCount}, Failed: ${errorCount}, Created: ${createdCount}, Merged: ${mergedCount}`);
