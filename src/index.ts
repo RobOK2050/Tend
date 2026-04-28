@@ -27,6 +27,7 @@ program
   .option('--mcp <strategy>', 'MCP strategy: "official" (default, cloud-based) or "local"')
   .option('--dry-run', 'Preview without writing files')
   .option('--verbose', 'Verbose logging')
+  .option('--skip-review', 'Skip creating zReview backups on merge (faster for bulk re-syncs)')
   .action(syncCommand);
 
 // Global signal handlers for graceful shutdown

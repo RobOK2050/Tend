@@ -1,18 +1,29 @@
 /**
  * Vault File Manager - handles reading and writing markdown files to Obsidian vault
  * New structure: All contacts in /40 People/ folder (flat), communities stored in YAML
+ *
+ * Performance optimizations (2026-01-28):
+ * - Batch cache writes: call flushCache() at end of sync instead of per-contact
+ * - Skip unchanged: compares content before writing to avoid unnecessary I/O
+ * - Async grep: non-blocking file search for clayId lookups
+ * - Optional zReview backup: --skip-review flag to disable backup creation
  */
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import type { TendContact } from '../models/tend-contact';
 import { TemplateEngine } from '../templates/template-engine';
 import { MarkdownParser } from './markdown-parser';
 import { MarkdownMerger } from './markdown-merger';
 import { generateFilename } from '../utils/file-naming';
 
+const execAsync = promisify(exec);
+
 export interface FileManagerConfig {
   vaultPath: string;
+  skipReview?: boolean; // If true, don't create zReview backups on merge
 }
 
 export interface WriteResult {
@@ -20,6 +31,7 @@ export interface WriteResult {
   filename: string;
   created: boolean;
   merged: boolean;
+  skipped?: boolean; // True if content unchanged
   preservedSections?: string[];
   preservedDateEntries?: number;
   updatedSections?: string[];
@@ -37,11 +49,14 @@ export class VaultFileManager {
   private merger: MarkdownMerger;
   private clayIdCache: ClayIdCache = {};
   private cacheFilePath: string;
+  private cacheModified: boolean = false; // Track if cache needs saving
+  private skipReview: boolean;
 
   constructor(config: FileManagerConfig) {
     this.vaultPath = config.vaultPath;
     this.contactsFolder = this.vaultPath;
     this.cacheFilePath = path.join(this.vaultPath, '.clayid-cache.json');
+    this.skipReview = config.skipReview || false;
     this.templateEngine = new TemplateEngine();
     this.parser = new MarkdownParser();
     this.merger = new MarkdownMerger();
@@ -73,11 +88,17 @@ export class VaultFileManager {
   }
 
   /**
-   * Save clayId cache to disk
+   * Save clayId cache to disk (only if modified)
+   * Call this at the END of a sync batch for best performance
    */
-  private async saveCache(): Promise<void> {
+  async flushCache(): Promise<void> {
+    if (!this.cacheModified) {
+      return; // No changes to save
+    }
+
     try {
       await fs.writeFile(this.cacheFilePath, JSON.stringify(this.clayIdCache, null, 2), 'utf-8');
+      this.cacheModified = false;
     } catch (error) {
       // Non-critical failure - log but don't throw
       console.warn('[Cache] Error saving clayId cache:', error instanceof Error ? error.message : String(error));
@@ -85,11 +106,35 @@ export class VaultFileManager {
   }
 
   /**
-   * Add entry to clayId cache
+   * Add entry to clayId cache (marks cache as modified, doesn't save immediately)
+   * Call flushCache() at end of batch to persist
    */
-  private async updateCache(clayId: number, filepath: string): Promise<void> {
+  private updateCache(clayId: number, filepath: string): void {
     this.clayIdCache[clayId] = filepath;
-    await this.saveCache();
+    this.cacheModified = true;
+  }
+
+  /**
+   * Remove entry from clayId cache
+   */
+  private removeFromCache(clayId: number): void {
+    if (this.clayIdCache[clayId]) {
+      delete this.clayIdCache[clayId];
+      this.cacheModified = true;
+    }
+  }
+
+  /**
+   * Generate timestamp suffix for backup files: YYYYMMDD-HHMM
+   */
+  private generateTimestamp(): string {
+    const now = new Date();
+    return now.getFullYear().toString() +
+      String(now.getMonth() + 1).padStart(2, '0') +
+      String(now.getDate()).padStart(2, '0') +
+      '-' +
+      String(now.getHours()).padStart(2, '0') +
+      String(now.getMinutes()).padStart(2, '0');
   }
 
   /**
@@ -97,10 +142,12 @@ export class VaultFileManager {
    * Implements intelligent merge: re-sync with fresh Clay data while preserving user notes and external properties
    *
    * Algorithm:
-   * 1. Detect if file exists (by clayId search)
+   * 1. Detect if file exists (by name, then clayId search)
    * 2. If exists, parse and intelligently merge with fresh data
-   * 3. Write merged (or new) content to /40 People/{ContactName}.md
-   * 4. Return result with merge metadata
+   * 3. Skip write if content unchanged (optimization for re-syncs)
+   * 4. Optionally backup old version to zReview (unless skipReview=true)
+   * 5. Write merged (or new) content to /40 People/{ContactName}.md
+   * 6. Return result with merge metadata
    */
   async writeContact(contact: TendContact): Promise<WriteResult> {
     // Generate base filename
@@ -109,7 +156,7 @@ export class VaultFileManager {
     // All files go to /40 People/ folder
     const targetPath = path.join(this.contactsFolder, baseFilename);
 
-    // Search for existing file by clayId
+    // Search for existing file by name, then clayId
     const existingPath = await this.findExistingFile(contact);
 
     // Generate fresh markdown from Clay data
@@ -123,8 +170,8 @@ export class VaultFileManager {
       // Write fresh markdown
       await fs.writeFile(targetPath, freshMarkdown, 'utf-8');
 
-      // Cache the new clayId → filepath mapping
-      await this.updateCache(contact.clayId, targetPath);
+      // Cache the new clayId → filepath mapping (batched save)
+      this.updateCache(contact.clayId, targetPath);
 
       return {
         filepath: targetPath,
@@ -146,20 +193,31 @@ export class VaultFileManager {
       // Merge: fresh system sections + preserved user sections + preserved date entries + preserve all YAML properties
       const mergeResult = this.merger.merge(existingParsed, freshParsed);
 
-      // If file is being updated (merged), move old version to zReview folder with timestamp
-      if (targetPath === existingPath) {
+      // Skip write if content unchanged (optimization for bulk re-syncs)
+      if (mergeResult.markdown.trim() === existingMarkdown.trim()) {
+        // Update cache path if needed (file might have been found by clayId with different name)
+        if (targetPath !== existingPath) {
+          this.removeFromCache(contact.clayId);
+          this.updateCache(contact.clayId, targetPath);
+        }
+
+        return {
+          filepath: existingPath,
+          filename: path.basename(existingPath),
+          created: false,
+          merged: false,
+          skipped: true,
+          preservedSections: mergeResult.preservedSections,
+          preservedDateEntries: mergeResult.preservedDateEntries
+        };
+      }
+
+      // Backup to zReview (unless skipReview is true)
+      if (!this.skipReview && targetPath === existingPath) {
         const reviewFolder = path.join(this.vaultPath, '..', 'zReview');
         await fs.ensureDir(reviewFolder);
 
-        // Generate timestamp suffix: YYYYMMDD-HHMM
-        const now = new Date();
-        const timestamp = now.getFullYear().toString() +
-          String(now.getMonth() + 1).padStart(2, '0') +
-          String(now.getDate()).padStart(2, '0') +
-          '-' +
-          String(now.getHours()).padStart(2, '0') +
-          String(now.getMinutes()).padStart(2, '0');
-
+        const timestamp = this.generateTimestamp();
         const oldFileName = baseFilename.replace('.md', `-${timestamp}.md`);
         const reviewPath = path.join(reviewFolder, oldFileName);
 
@@ -167,13 +225,13 @@ export class VaultFileManager {
         await fs.move(existingPath, reviewPath, { overwrite: true });
       }
 
-      // Write merged content to original location
+      // Write merged content to target location
       await fs.writeFile(targetPath, mergeResult.markdown, 'utf-8');
 
       // Update cache if path changed
       if (targetPath !== existingPath) {
-        delete this.clayIdCache[contact.clayId];
-        await this.updateCache(contact.clayId, targetPath);
+        this.removeFromCache(contact.clayId);
+        this.updateCache(contact.clayId, targetPath);
       }
 
       return {
@@ -186,21 +244,16 @@ export class VaultFileManager {
         updatedSections: mergeResult.updatedSections
       };
     } catch (error) {
-      // If merge fails (malformed file, parsing error), move to zReview and write fresh
+      // If merge fails (malformed file, parsing error), backup to zReview with ERROR suffix and write fresh
       const reviewFolder = path.join(this.vaultPath, '..', 'zReview');
       await fs.ensureDir(reviewFolder);
 
-      // Generate timestamp suffix: YYYYMMDD-HHMM
-      const now = new Date();
-      const timestamp = now.getFullYear().toString() +
-        String(now.getMonth() + 1).padStart(2, '0') +
-        String(now.getDate()).padStart(2, '0') +
-        '-' +
-        String(now.getHours()).padStart(2, '0') +
-        String(now.getMinutes()).padStart(2, '0');
-
+      const timestamp = this.generateTimestamp();
       const backupFileName = baseFilename.replace('.md', `-${timestamp}-ERROR.md`);
       const backupPath = path.join(reviewFolder, backupFileName);
+
+      // Log the actual error for debugging
+      console.warn(`[Merge] Error merging ${baseFilename}:`, error instanceof Error ? error.message : String(error));
 
       await fs.move(existingPath, backupPath, { overwrite: true });
 
@@ -211,7 +264,7 @@ export class VaultFileManager {
       await fs.writeFile(targetPath, freshMarkdown, 'utf-8');
 
       // Update cache
-      await this.updateCache(contact.clayId, targetPath);
+      this.updateCache(contact.clayId, targetPath);
 
       return {
         filepath: targetPath,
@@ -253,11 +306,10 @@ export class VaultFileManager {
 
   /**
    * Search vault for file with matching clayId in frontmatter
-   * PRIMARY method for finding existing contacts
    *
    * Algorithm:
    * 1. Check cache first (O(1) lookup) - fast path
-   * 2. Cache miss → use grep to search for clayId pattern
+   * 2. Cache miss → use async grep to search for clayId pattern
    * 3. Found → update cache for future lookups
    * 4. Not found → return null
    */
@@ -270,16 +322,15 @@ export class VaultFileManager {
         return cachedPath;
       }
       // Remove stale cache entry if file was deleted
-      delete this.clayIdCache[clayId];
-      await this.saveCache();
+      this.removeFromCache(clayId);
     }
 
-    // 2. Cache miss - use grep to search for clayId (much faster than parsing every file)
+    // 2. Cache miss - use async grep to search for clayId (non-blocking)
     const filePath = await this.findFileByGrepClayId(clayId);
 
     if (filePath) {
       // 3. Found match - update cache for future lookups
-      await this.updateCache(clayId, filePath);
+      this.updateCache(clayId, filePath);
       return filePath;
     }
 
@@ -287,23 +338,23 @@ export class VaultFileManager {
   }
 
   /**
-   * Use grep to search for clayId in markdown files
-   * Much faster than reading + parsing every file
+   * Use async grep to search for clayId in markdown files
+   * Much faster than reading + parsing every file, and non-blocking
    */
   private async findFileByGrepClayId(clayId: number): Promise<string | null> {
     try {
-      const { execSync } = await import('child_process');
-
       // Search for pattern: "clayId: 45241459" (YAML format)
+      // Using numeric clayId directly is safe (no shell injection risk)
       const pattern = `clayId: ${clayId}`;
 
-      // Use grep to find files with this pattern in /40 People/ folder
+      // Use async grep to find files with this pattern in /40 People/ folder
       // -r: recursive, -l: list filenames only, --include: only .md files
-      const result = execSync(
+      const { stdout } = await execAsync(
         `grep -r "${pattern}" "${this.contactsFolder}" --include="*.md" -l`,
-        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }
-      ).trim();
+        { encoding: 'utf-8' }
+      );
 
+      const result = stdout.trim();
       if (!result) {
         return null;
       }
@@ -311,10 +362,10 @@ export class VaultFileManager {
       // Return first match (should be only one match, but take first if multiple)
       const files = result.split('\n').filter(f => f.length > 0);
       return files[0] || null;
-    } catch (error) {
+    } catch (error: any) {
       // grep returns exit code 1 if no matches found (normal condition)
       // Only log actual errors
-      if (error instanceof Error && !error.message.includes('exit code 1')) {
+      if (error.code !== 1) {
         console.warn(`[Grep] Error searching for clayId ${clayId}:`, error.message);
       }
       return null;
@@ -325,7 +376,7 @@ export class VaultFileManager {
    * Read a markdown file from the vault
    */
   async readFile(filepath: string): Promise<string> {
-    if (!fs.pathExistsSync(filepath)) {
+    if (!(await fs.pathExists(filepath))) {
       throw new Error(`File not found: ${filepath}`);
     }
 

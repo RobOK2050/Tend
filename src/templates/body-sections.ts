@@ -26,7 +26,10 @@ export class BodySectionGenerator {
     sections.push('---');
 
     // Contact information links (including Clay app link)
-    sections.push(this.generateContactLinksSection(contact));
+    const linksContent = this.generateContactLinksSection(contact);
+    if (linksContent) {
+      sections.push('## Links\n\n' + linksContent);
+    }
 
     // Horizontal rule to separate links from Notes
     sections.push('---');

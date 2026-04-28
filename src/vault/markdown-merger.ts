@@ -14,6 +14,35 @@ export interface MergeResult {
 }
 
 export class MarkdownMerger {
+  // Static constants for performance (avoid recreation per merge)
+  private static readonly CLAY_FIELDS = [
+    'name',
+    'type',
+    'clayId',
+    'status',
+    'updated',
+    'bio',
+    'email',
+    'phone',
+    'location',
+    'social',
+    'tags',
+    'lastContact',
+    'organization',
+    'title',
+    'industry',
+    'relationshipScore',
+    'interactions',
+    'clayUrl',
+    'clayCreated',
+    'clayIntegrations'
+  ];
+
+  private static readonly DATE_FIELDS = ['birthday', 'lastContact', 'nextFollowup', 'created', 'updated', 'clayCreated'];
+
+  // Regex to unwrap wikilinks: [[Community]] → Community
+  private static readonly WIKILINK_REGEX = /^\[\[|\]\]$/g;
+
   /**
    * Merge existing markdown with fresh Clay data
    *
@@ -81,35 +110,11 @@ export class MarkdownMerger {
    * Result: {customField: "value", communities: ["Family", "Arc"], name: "New Name", title: "Engineer"}
    */
   private mergeFrontmatter(existing: Frontmatter, fresh: Frontmatter): Frontmatter {
-    // Fields that come from Clay - ALWAYS update from fresh
-    const clayFields = [
-      'name',
-      'type',
-      'clayId',
-      'status',
-      'updated',
-      'bio',
-      'email',
-      'phone',
-      'location',
-      'social',
-      'tags',
-      'lastContact',
-      'organization',
-      'title',
-      'industry',
-      'relationshipScore',
-      'interactions',
-      'clayUrl',
-      'clayCreated',
-      'clayIntegrations'
-    ];
-
     // Start with existing frontmatter - preserves all user-managed fields
     const merged: Frontmatter = { ...existing };
 
     // Update Clay fields ALWAYS from fresh data (even if they exist in merged)
-    for (const field of clayFields) {
+    for (const field of MarkdownMerger.CLAY_FIELDS) {
       if (fresh[field] !== undefined) {
         merged[field] = fresh[field];
       }
@@ -120,9 +125,9 @@ export class MarkdownMerger {
     let existingCommunities = (existing.communities || []) as string[];
     let freshCommunities = (fresh.communities || []) as string[];
 
-    // Unwrap any existing wikilinks ([[Community]]) for comparison
-    existingCommunities = existingCommunities.map((c: string) => c.replace(/^\[\[/, '').replace(/\]\]$/, ''));
-    freshCommunities = freshCommunities.map((c: string) => c.replace(/^\[\[/, '').replace(/\]\]$/, ''));
+    // Unwrap any existing wikilinks ([[Community]]) for comparison (single regex pass)
+    existingCommunities = existingCommunities.map((c: string) => c.replace(MarkdownMerger.WIKILINK_REGEX, ''));
+    freshCommunities = freshCommunities.map((c: string) => c.replace(MarkdownMerger.WIKILINK_REGEX, ''));
 
     // Combine and deduplicate
     const allCommunities = [...new Set([...existingCommunities, ...freshCommunities])];
@@ -134,8 +139,7 @@ export class MarkdownMerger {
 
     // SPECIAL HANDLING: Normalize date fields to YYYY-MM-DD format
     // This ensures dates from merges or imports are consistently formatted
-    const dateFields = ['birthday', 'lastContact', 'nextFollowup', 'created', 'updated', 'clayCreated'];
-    for (const field of dateFields) {
+    for (const field of MarkdownMerger.DATE_FIELDS) {
       if (merged[field]) {
         merged[field] = this.normalizeDateFormat(merged[field]);
       }

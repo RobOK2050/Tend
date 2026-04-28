@@ -23,6 +23,7 @@ interface SyncOptions {
   dryRun?: boolean;
   verbose?: boolean;
   mcp?: 'official' | 'local'; // MCP strategy: default is 'official'
+  skipReview?: boolean; // If true, don't create zReview backups on merge
 }
 
 export async function syncCommand(options: SyncOptions): Promise<void> {
@@ -66,7 +67,10 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     logger.logCheckpoint('Data Processing Start', 'Beginning contact transformation and vault writing');
 
     // Initialize file manager and status tracker
-    const fileManager = new VaultFileManager({ vaultPath });
+    const fileManager = new VaultFileManager({
+      vaultPath,
+      skipReview: options.skipReview
+    });
     const statusTracker = new StatusTracker(vaultPath);
     const mapper = new ContactMapper();
 
@@ -75,7 +79,8 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     let errorCount = 0;
     let createdCount = 0;
     let mergedCount = 0;
-    const results: { name: string; status: 'success' | 'error'; message: string; created?: boolean; merged?: boolean; group?: string; communities?: string[] }[] = [];
+    let skippedCount = 0; // Unchanged files (optimization)
+    const results: { name: string; status: 'success' | 'error'; message: string; created?: boolean; merged?: boolean; skipped?: boolean; group?: string; communities?: string[] }[] = [];
 
     // Process each contact
     for (let i = 0; i < contactData.length; i++) {
@@ -120,11 +125,13 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
             spinner.succeed(`${clayContact.name} → ${writeResult.filename}`);
           }
 
-          // Track created vs merged
+          // Track created vs merged vs skipped
           if (writeResult.created) {
             createdCount++;
           } else if (writeResult.merged) {
             mergedCount++;
+          } else if (writeResult.skipped) {
+            skippedCount++;
           }
 
           // Add to status file
@@ -166,6 +173,7 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
           message: options.dryRun ? 'Would sync' : 'Synced',
           created: writeResult?.created,
           merged: writeResult?.merged,
+          skipped: writeResult?.skipped,
           group,
           communities: displayCommunities
         });
@@ -195,13 +203,20 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     // Finalize status tracker - writes all entries as new session at top of Tend-status.md
     statusTracker.finalizeSession();
 
+    // Flush cache - batched write for performance (single disk write instead of per-contact)
+    await fileManager.flushCache();
+
     // Summary
     logger.logSummary(successCount, errorCount, contactData.length);
-    logger.logCheckpoint('Program End', `Success: ${successCount}, Failed: ${errorCount}, Created: ${createdCount}, Merged: ${mergedCount}`);
+    logger.logCheckpoint('Program End', `Success: ${successCount}, Failed: ${errorCount}, Created: ${createdCount}, Merged: ${mergedCount}, Skipped: ${skippedCount}`);
 
     console.log();
     console.log(chalk.blue('Summary:'));
-    console.log(chalk.green(`✓ Synced: ${successCount}${createdCount > 0 || mergedCount > 0 ? ` (${createdCount} created, ${mergedCount} merged)` : ''}`));
+    const detailParts: string[] = [];
+    if (createdCount > 0) detailParts.push(`${createdCount} created`);
+    if (mergedCount > 0) detailParts.push(`${mergedCount} merged`);
+    if (skippedCount > 0) detailParts.push(`${skippedCount} unchanged`);
+    console.log(chalk.green(`✓ Synced: ${successCount}${detailParts.length > 0 ? ` (${detailParts.join(', ')})` : ''}`));
     if (errorCount > 0) {
       console.log(chalk.red(`✗ Failed: ${errorCount}`));
     }
@@ -232,7 +247,7 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
       results.forEach(r => {
         const statusIcon = r.status === 'success' ? '✓' : '✗';
         const statusLabel = r.status === 'success'
-          ? (r.merged ? 'Merged' : r.created ? 'Created' : 'Updated')
+          ? (r.skipped ? 'Unchanged' : r.merged ? 'Merged' : r.created ? 'Created' : 'Updated')
           : 'Failed';
         const statusDisplay = `${statusIcon} ${statusLabel}`.padEnd(statusWidth);
         const communitiesDisplay = r.communities && r.communities.length > 0

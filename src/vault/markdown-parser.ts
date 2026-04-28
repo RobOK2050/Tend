@@ -22,6 +22,10 @@ export interface Section {
 }
 
 export class MarkdownParser {
+  // Pre-compiled regexes for performance (avoid recompilation per line)
+  private static readonly HEADER_REGEX = /^(##|####)\s+(.+)$/;
+  private static readonly DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
   /**
    * Parse complete markdown file into structured components
    */
@@ -117,7 +121,7 @@ export class MarkdownParser {
       // Match headers: ## (2 hashes) and #### (4 hashes) only
       // Skip ### (3 hashes) - these are subsections within parent sections
       // This allows hierarchical structure: ## Section > ### Subsection > content
-      const headerMatch = line.match(/^(##|####)\s+(.+)$/);
+      const headerMatch = line.match(MarkdownParser.HEADER_REGEX);
 
       if (headerMatch) {
         // Save previous section
@@ -181,7 +185,7 @@ export class MarkdownParser {
    */
   private categorizeSection(heading: string): 'system' | 'user' | 'date' {
     // Check if date entry (####YYYY-MM-DD format)
-    if (/^\d{4}-\d{2}-\d{2}$/.test(heading)) {
+    if (MarkdownParser.DATE_REGEX.test(heading)) {
       return 'date';
     }
 
