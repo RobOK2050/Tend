@@ -5,13 +5,13 @@
  * Performance optimizations (2026-01-28):
  * - Batch cache writes: call flushCache() at end of sync instead of per-contact
  * - Skip unchanged: compares content before writing to avoid unnecessary I/O
- * - Async grep: non-blocking file search for clayId lookups
+ * - Async rg: non-blocking file search for clayId lookups
  * - Optional zReview backup: --skip-review flag to disable backup creation
  */
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { TendContact } from '../models/tend-contact';
 import { TemplateEngine } from '../templates/template-engine';
@@ -19,11 +19,12 @@ import { MarkdownParser } from './markdown-parser';
 import { MarkdownMerger } from './markdown-merger';
 import { generateFilename } from '../utils/file-naming';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface FileManagerConfig {
   vaultPath: string;
   skipReview?: boolean; // If true, don't create zReview backups on merge
+  useCache?: boolean; // If false, always search live and never write cache entries
 }
 
 export interface WriteResult {
@@ -32,9 +33,20 @@ export interface WriteResult {
   created: boolean;
   merged: boolean;
   skipped?: boolean; // True if content unchanged
+  matchMethod?: 'clayId' | 'name' | 'none';
+  suggestedFilename?: string;
   preservedSections?: string[];
   preservedDateEntries?: number;
   updatedSections?: string[];
+}
+
+export interface ContactPlan {
+  action: 'create' | 'merge' | 'adopt-legacy' | 'suggest-rename';
+  filepath: string;
+  filename: string;
+  matchMethod: 'clayId' | 'name' | 'none';
+  suggestedFilename?: string;
+  duplicatePaths?: string[];
 }
 
 interface ClayIdCache {
@@ -51,18 +63,20 @@ export class VaultFileManager {
   private cacheFilePath: string;
   private cacheModified: boolean = false; // Track if cache needs saving
   private skipReview: boolean;
+  private useCache: boolean;
 
   constructor(config: FileManagerConfig) {
     this.vaultPath = config.vaultPath;
     this.contactsFolder = this.vaultPath;
     this.cacheFilePath = path.join(this.vaultPath, '.clayid-cache.json');
     this.skipReview = config.skipReview || false;
+    this.useCache = config.useCache !== false;
     this.templateEngine = new TemplateEngine();
     this.parser = new MarkdownParser();
     this.merger = new MarkdownMerger();
 
     // Load clayId cache (prevents O(n²) file lookups)
-    this.clayIdCache = this.loadCache();
+    this.clayIdCache = this.useCache ? this.loadCache() : {};
 
     // Validate vault path
     if (!fs.pathExistsSync(this.vaultPath)) {
@@ -110,6 +124,9 @@ export class VaultFileManager {
    * Call flushCache() at end of batch to persist
    */
   private updateCache(clayId: number, filepath: string): void {
+    if (!this.useCache) {
+      return;
+    }
     this.clayIdCache[clayId] = filepath;
     this.cacheModified = true;
   }
@@ -118,6 +135,9 @@ export class VaultFileManager {
    * Remove entry from clayId cache
    */
   private removeFromCache(clayId: number): void {
+    if (!this.useCache) {
+      return;
+    }
     if (this.clayIdCache[clayId]) {
       delete this.clayIdCache[clayId];
       this.cacheModified = true;
@@ -142,7 +162,7 @@ export class VaultFileManager {
    * Implements intelligent merge: re-sync with fresh Clay data while preserving user notes and external properties
    *
    * Algorithm:
-   * 1. Detect if file exists (by name, then clayId search)
+   * 1. Detect if file exists (by clayId, then name fallback for legacy notes)
    * 2. If exists, parse and intelligently merge with fresh data
    * 3. Skip write if content unchanged (optimization for re-syncs)
    * 4. Optionally backup old version to zReview (unless skipReview=true)
@@ -156,8 +176,9 @@ export class VaultFileManager {
     // All files go to /40 People/ folder
     const targetPath = path.join(this.contactsFolder, baseFilename);
 
-    // Search for existing file by name, then clayId
-    const existingPath = await this.findExistingFile(contact);
+    // Search for existing file by clayId first, then name fallback
+    const existingMatch = await this.findExistingFile(contact);
+    const existingPath = existingMatch?.filepath || null;
 
     // Generate fresh markdown from Clay data
     const freshMarkdown = this.templateEngine.generateMarkdown(contact);
@@ -177,7 +198,8 @@ export class VaultFileManager {
         filepath: targetPath,
         filename: baseFilename,
         created: true,
-        merged: false
+        merged: false,
+        matchMethod: 'none'
       };
     }
 
@@ -195,11 +217,7 @@ export class VaultFileManager {
 
       // Skip write if content unchanged (optimization for bulk re-syncs)
       if (mergeResult.markdown.trim() === existingMarkdown.trim()) {
-        // Update cache path if needed (file might have been found by clayId with different name)
-        if (targetPath !== existingPath) {
-          this.removeFromCache(contact.clayId);
-          this.updateCache(contact.clayId, targetPath);
-        }
+        this.updateCache(contact.clayId, existingPath);
 
         return {
           filepath: existingPath,
@@ -207,38 +225,40 @@ export class VaultFileManager {
           created: false,
           merged: false,
           skipped: true,
+          matchMethod: existingMatch?.method,
+          suggestedFilename: this.getSuggestedFilename(existingPath, baseFilename),
           preservedSections: mergeResult.preservedSections,
           preservedDateEntries: mergeResult.preservedDateEntries
         };
       }
 
       // Backup to zReview (unless skipReview is true)
-      if (!this.skipReview && targetPath === existingPath) {
+      if (!this.skipReview) {
         const reviewFolder = path.join(this.vaultPath, '..', 'zReview');
         await fs.ensureDir(reviewFolder);
 
         const timestamp = this.generateTimestamp();
-        const oldFileName = baseFilename.replace('.md', `-${timestamp}.md`);
+        const oldFileName = path.basename(existingPath).replace('.md', `-${timestamp}.md`);
         const reviewPath = path.join(reviewFolder, oldFileName);
 
-        // Move existing file to zReview
-        await fs.move(existingPath, reviewPath, { overwrite: true });
+        // Copy existing file to zReview. The active note remains in place so
+        // Obsidian links are not silently renamed or moved.
+        await fs.copy(existingPath, reviewPath, { overwrite: true });
       }
 
-      // Write merged content to target location
-      await fs.writeFile(targetPath, mergeResult.markdown, 'utf-8');
+      // Write merged content in place. If the display name changed, report a
+      // suggested rename instead of breaking existing Obsidian wikilinks.
+      await fs.writeFile(existingPath, mergeResult.markdown, 'utf-8');
 
-      // Update cache if path changed
-      if (targetPath !== existingPath) {
-        this.removeFromCache(contact.clayId);
-        this.updateCache(contact.clayId, targetPath);
-      }
+      this.updateCache(contact.clayId, existingPath);
 
       return {
-        filepath: targetPath,
-        filename: baseFilename,
+        filepath: existingPath,
+        filename: path.basename(existingPath),
         created: false,
         merged: true,
+        matchMethod: existingMatch?.method,
+        suggestedFilename: this.getSuggestedFilename(existingPath, baseFilename),
         preservedSections: mergeResult.preservedSections,
         preservedDateEntries: mergeResult.preservedDateEntries,
         updatedSections: mergeResult.updatedSections
@@ -255,50 +275,77 @@ export class VaultFileManager {
       // Log the actual error for debugging
       console.warn(`[Merge] Error merging ${baseFilename}:`, error instanceof Error ? error.message : String(error));
 
-      await fs.move(existingPath, backupPath, { overwrite: true });
+      await fs.copy(existingPath, backupPath, { overwrite: true });
 
-      // Ensure /40 People/ directory exists
-      await fs.ensureDir(this.contactsFolder);
-
-      // Write fresh markdown (no merge)
-      await fs.writeFile(targetPath, freshMarkdown, 'utf-8');
+      // Write fresh markdown in place (no merge), preserving Obsidian link target
+      await fs.writeFile(existingPath, freshMarkdown, 'utf-8');
 
       // Update cache
-      this.updateCache(contact.clayId, targetPath);
+      this.updateCache(contact.clayId, existingPath);
 
       return {
-        filepath: targetPath,
-        filename: baseFilename,
+        filepath: existingPath,
+        filename: path.basename(existingPath),
         created: false,
         merged: false,
+        matchMethod: existingMatch?.method,
+        suggestedFilename: this.getSuggestedFilename(existingPath, baseFilename),
         preservedSections: [] // Nothing preserved due to error
       };
     }
   }
 
   /**
-   * Find existing file - PRIMARY: by NAME
-   *
-   * Uses contact name as primary identifier:
-   * - Matches files from TheBrain, manual entries, and other sources
-   * - Merges Clay data INTO existing vault files
-   * - Works with files that don't have clayId yet
-   * - Fallback to clayId for files already synced
+   * Plan a contact write without touching the filesystem.
    */
-  private async findExistingFile(contact: TendContact): Promise<string | null> {
-    // PRIMARY: Search by name in /40 People/ folder
-    // This finds existing files from TheBrain and other sources
+  async planContact(contact: TendContact): Promise<ContactPlan> {
     const baseFilename = generateFilename(contact.name);
-    const nameBasedPath = path.join(this.contactsFolder, baseFilename);
-    if (await fs.pathExists(nameBasedPath)) {
-      return nameBasedPath;
+    const targetPath = path.join(this.contactsFolder, baseFilename);
+    const existingMatch = await this.findExistingFile(contact);
+
+    if (!existingMatch) {
+      return {
+        action: 'create',
+        filepath: targetPath,
+        filename: baseFilename,
+        matchMethod: 'none'
+      };
     }
 
-    // FALLBACK: Search by clayId in frontmatter
-    // Handles cases where contact was renamed in Clay after initial sync
+    const suggestedFilename = this.getSuggestedFilename(existingMatch.filepath, baseFilename);
+    return {
+      action: existingMatch.method === 'name'
+        ? 'adopt-legacy'
+        : suggestedFilename
+          ? 'suggest-rename'
+          : 'merge',
+      filepath: existingMatch.filepath,
+      filename: path.basename(existingMatch.filepath),
+      matchMethod: existingMatch.method,
+      suggestedFilename
+    };
+  }
+
+  /**
+   * Find existing file - PRIMARY: by clayId
+   *
+   * Uses the stable Clay/Mesh ID as the identity key:
+   * - Handles contact name changes without duplicate files
+   * - Prevents wrong-note merges when names collide
+   * - Falls back to name only for legacy notes that do not have clayId yet
+   */
+  private async findExistingFile(contact: TendContact): Promise<{ filepath: string; method: 'clayId' | 'name' } | null> {
+    // PRIMARY: Search by clayId in frontmatter
     const fileByClayId = await this.findFileByClayId(contact.clayId);
     if (fileByClayId) {
-      return fileByClayId;
+      return { filepath: fileByClayId, method: 'clayId' };
+    }
+
+    // FALLBACK: Search by name anywhere under the vault for legacy notes
+    const baseFilename = generateFilename(contact.name);
+    const fileByName = await this.findFileByName(baseFilename);
+    if (fileByName) {
+      return { filepath: fileByName, method: 'name' };
     }
 
     return null;
@@ -309,13 +356,13 @@ export class VaultFileManager {
    *
    * Algorithm:
    * 1. Check cache first (O(1) lookup) - fast path
-   * 2. Cache miss → use async grep to search for clayId pattern
+   * 2. Cache miss → use async rg to search for clayId pattern
    * 3. Found → update cache for future lookups
    * 4. Not found → return null
    */
   private async findFileByClayId(clayId: number): Promise<string | null> {
     // 1. Check cache first (fast path - O(1))
-    const cachedPath = this.clayIdCache[clayId];
+    const cachedPath = this.useCache ? this.clayIdCache[clayId] : undefined;
     if (cachedPath) {
       // Verify cached path still exists
       if (await fs.pathExists(cachedPath)) {
@@ -325,8 +372,8 @@ export class VaultFileManager {
       this.removeFromCache(clayId);
     }
 
-    // 2. Cache miss - use async grep to search for clayId (non-blocking)
-    const filePath = await this.findFileByGrepClayId(clayId);
+    // 2. Cache miss - use async rg to search for clayId (non-blocking)
+    const filePath = await this.findFileBySearchClayId(clayId);
 
     if (filePath) {
       // 3. Found match - update cache for future lookups
@@ -338,38 +385,112 @@ export class VaultFileManager {
   }
 
   /**
-   * Use async grep to search for clayId in markdown files
+   * Use async rg to search for clayId in markdown files
    * Much faster than reading + parsing every file, and non-blocking
    */
-  private async findFileByGrepClayId(clayId: number): Promise<string | null> {
-    try {
-      // Search for pattern: "clayId: 45241459" (YAML format)
-      // Using numeric clayId directly is safe (no shell injection risk)
-      const pattern = `clayId: ${clayId}`;
+  private async findFileBySearchClayId(clayId: number): Promise<string | null> {
+    const patterns = [
+      `clayId: ${clayId}`,
+      `clayid: ${clayId}`
+    ];
+    const files = new Set<string>();
 
-      // Use async grep to find files with this pattern in /40 People/ folder
-      // -r: recursive, -l: list filenames only, --include: only .md files
-      const { stdout } = await execAsync(
-        `grep -r "${pattern}" "${this.contactsFolder}" --include="*.md" -l`,
+    for (const pattern of patterns) {
+      for (const file of await this.searchFilesByFixedString(pattern)) {
+        files.add(file);
+      }
+    }
+
+    if (files.size === 0) {
+      return null;
+    }
+
+    if (files.size > 1) {
+      throw new Error(`Duplicate clayId ${clayId} found in multiple notes: ${Array.from(files).join(', ')}`);
+    }
+    return Array.from(files)[0] || null;
+  }
+
+  /**
+   * Search for an exact markdown filename anywhere under the vault.
+   */
+  private async findFileByName(filename: string): Promise<string | null> {
+    const files = await this.findFilesByName(filename);
+
+    if (files.length === 0) {
+      return null;
+    }
+
+    if (files.length > 1) {
+      throw new Error(`Multiple legacy notes named ${filename}: ${files.join(', ')}`);
+    }
+
+    return files[0] || null;
+  }
+
+  private async findFilesByName(filename: string): Promise<string[]> {
+    try {
+      const { stdout } = await execFileAsync(
+        'rg',
+        [
+          '--files',
+          '--glob',
+          filename,
+          '--no-ignore',
+          '--no-messages',
+          this.contactsFolder
+        ],
         { encoding: 'utf-8' }
       );
 
-      const result = stdout.trim();
-      if (!result) {
-        return null;
+      return this.parseSearchOutput(stdout);
+    } catch (error: any) {
+      // rg returns exit code 1 if no matches found (normal condition)
+      if (error.code !== 1) {
+        console.warn(`[Search] Error searching for ${filename}:`, error.message);
+      }
+      return [];
+    }
+  }
+
+  private async searchFilesByFixedString(pattern: string): Promise<string[]> {
+    try {
+      const { stdout } = await execFileAsync(
+        'rg',
+        [
+          '--fixed-strings',
+          '--files-with-matches',
+          '--glob',
+          '*.md',
+          '--no-ignore',
+          '--no-messages',
+          pattern,
+          this.contactsFolder
+        ],
+        { encoding: 'utf-8' }
+      );
+
+      return this.parseSearchOutput(stdout);
+    } catch (error: any) {
+      if (error.stdout) {
+        return this.parseSearchOutput(error.stdout);
       }
 
-      // Return first match (should be only one match, but take first if multiple)
-      const files = result.split('\n').filter(f => f.length > 0);
-      return files[0] || null;
-    } catch (error: any) {
-      // grep returns exit code 1 if no matches found (normal condition)
-      // Only log actual errors
-      if (error.code !== 1) {
-        console.warn(`[Grep] Error searching for clayId ${clayId}:`, error.message);
+      // rg returns exit code 1 when no matches are found. Exit code 2 can be
+      // caused by broken cloud-file placeholders; --no-messages keeps that quiet.
+      if (error.code !== 1 && error.code !== 2) {
+        console.warn(`[Search] Error searching for ${pattern}:`, error.message);
       }
-      return null;
+      return [];
     }
+  }
+
+  private parseSearchOutput(stdout: string): string[] {
+    return stdout
+      .trim()
+      .split('\n')
+      .map(f => f.trim())
+      .filter(f => f.length > 0);
   }
 
   /**
@@ -403,5 +524,10 @@ export class VaultFileManager {
    */
   getFilepath(filename: string): string {
     return path.join(this.contactsFolder, filename);
+  }
+
+  private getSuggestedFilename(existingPath: string, desiredFilename: string): string | undefined {
+    const currentFilename = path.basename(existingPath);
+    return currentFilename === desiredFilename ? undefined : desiredFilename;
   }
 }

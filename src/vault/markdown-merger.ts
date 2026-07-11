@@ -35,10 +35,14 @@ export class MarkdownMerger {
     'interactions',
     'clayUrl',
     'clayCreated',
-    'clayIntegrations'
+    'clayIntegrations',
+    'source',
+    'meshSyncedAt',
+    'meshUpdatedAt',
+    'meshCsvRowHash'
   ];
 
-  private static readonly DATE_FIELDS = ['birthday', 'lastContact', 'nextFollowup', 'created', 'updated', 'clayCreated'];
+  private static readonly DATE_FIELDS = ['birthday', 'lastContact', 'nextFollowup', 'created', 'updated', 'clayCreated', 'meshSyncedAt', 'meshUpdatedAt'];
 
   // Regex to unwrap wikilinks: [[Community]] → Community
   private static readonly WIKILINK_REGEX = /^\[\[|\]\]$/g;

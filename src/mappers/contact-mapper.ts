@@ -116,6 +116,10 @@ export class ContactMapper {
       tendCreated: new Date(),
       tendUpdated: new Date(),
       clayIntegrations: clay.integrations,
+      source: clay.source || 'clay',
+      csvRowHash: clay.csvRowHash,
+      meshSyncedAt: this.parseDate(clay.meshSyncedAt || null),
+      meshUpdatedAt: this.parseDate(clay.meshUpdatedAt || null),
 
       // Notes
       clayNotes: clay.notes,

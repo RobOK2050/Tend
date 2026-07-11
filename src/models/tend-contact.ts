@@ -56,6 +56,10 @@ export interface TendContact {
   tendCreated: Date;
   tendUpdated: Date;
   clayIntegrations: string[];
+  source?: 'clay' | 'mesh' | 'csv';
+  csvRowHash?: string;
+  meshSyncedAt?: Date | null;
+  meshUpdatedAt?: Date | null;
 
   // Notes (from Clay)
   clayNotes: string[];

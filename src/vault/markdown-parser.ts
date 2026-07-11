@@ -89,16 +89,40 @@ export class MarkdownParser {
       data = {};
     }
 
+    const normalizedData = this.normalizeFrontmatterAliases(data);
+
     // Ensure required fields exist (or will be filled by merge logic)
     return {
-      name: data.name || 'Unknown',
-      type: data.type || 'person',
-      clayId: data.clayId || 0,
-      status: data.status || 'active',
-      created: data.created || new Date().toISOString().split('T')[0],
-      updated: data.updated || new Date().toISOString().split('T')[0],
-      ...data // Spread remaining fields
+      ...normalizedData,
+      name: normalizedData.name || 'Unknown',
+      type: normalizedData.type || 'person',
+      clayId: normalizedData.clayId || 0,
+      status: normalizedData.status || 'active',
+      created: normalizedData.created || new Date().toISOString().split('T')[0],
+      updated: normalizedData.updated || new Date().toISOString().split('T')[0]
     };
+  }
+
+  private normalizeFrontmatterAliases(data: any): any {
+    const normalized = { ...data };
+    const aliases: Record<string, string> = {
+      clayid: 'clayId',
+      clayurl: 'clayUrl',
+      claycreated: 'clayCreated',
+      clayintegrations: 'clayIntegrations',
+      lastcontact: 'lastContact',
+      nextfollowup: 'nextFollowup',
+      relationshipscore: 'relationshipScore'
+    };
+
+    for (const [legacyKey, canonicalKey] of Object.entries(aliases)) {
+      if (normalized[canonicalKey] === undefined && normalized[legacyKey] !== undefined) {
+        normalized[canonicalKey] = normalized[legacyKey];
+      }
+      delete normalized[legacyKey];
+    }
+
+    return normalized;
   }
 
   /**

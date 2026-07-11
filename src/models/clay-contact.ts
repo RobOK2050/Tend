@@ -40,6 +40,12 @@ export interface ClayContact {
   url: string; // Clay web URL
   notes: string[]; // Array of note strings from Clay
   integrations: string[]; // Connected services (linkedin, email, calendar, etc.)
+
+  // Tend source metadata (used by Mesh API / CSV imports; optional for legacy Clay responses)
+  source?: 'clay' | 'mesh' | 'csv';
+  csvRowHash?: string;
+  meshSyncedAt?: string;
+  meshUpdatedAt?: string | null;
 }
 
 export interface WorkHistory {

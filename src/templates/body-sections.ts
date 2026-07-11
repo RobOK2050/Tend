@@ -124,8 +124,8 @@ export class BodySectionGenerator {
       }
     }
 
-    // Clay app link
-    links.push(`[Clay](clay://contact/${contact.clayId})`);
+    // Clay/Mesh universal link opens the native app when available.
+    links.push(`[Clay](https://web.clay.earth/open/contact/${contact.clayId})`);
 
     // TheBrain links as wikilinks
     const brainLinks: string[] = [];
@@ -249,7 +249,7 @@ export class BodySectionGenerator {
 
     for (let i = 0; i < contact.clayNotes.length; i++) {
       let note = contact.clayNotes[i];
-      // Convert Clay contact references [contact:ID:Name] to Obsidian format [[Name]] (clay://contact/ID)
+      // Convert Clay contact references [contact:ID:Name] to Obsidian format [[Name]] (web universal link)
       note = this.parseClaySocialReferences(note);
       content += `- ${note}\n`;
     }
@@ -260,11 +260,11 @@ export class BodySectionGenerator {
   /**
    * Parse Clay contact references and convert to Obsidian wikilinks
    * Converts: [contact:45340206:Vincent Arena]
-   * To: [[Vincent Arena]] (clay://contact/45340206)
+   * To: [[Vincent Arena]] (https://web.clay.earth/open/contact/45340206)
    */
   private parseClaySocialReferences(text: string): string {
     return text.replace(/\[contact:(\d+):([^\]]+)\]/g, (match, contactId, name) => {
-      return `[[${name}]] (clay://contact/${contactId})`;
+      return `[[${name}]] (https://web.clay.earth/open/contact/${contactId})`;
     });
   }
 

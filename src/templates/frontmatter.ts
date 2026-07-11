@@ -66,6 +66,10 @@ export class FrontmatterGenerator {
       ...(contact.clayIntegrations.length > 0 && {
         clayIntegrations: contact.clayIntegrations
       }),
+      ...(contact.source && { source: contact.source }),
+      ...(contact.meshSyncedAt && { meshSyncedAt: this.formatDate(contact.meshSyncedAt) }),
+      ...(contact.meshUpdatedAt && { meshUpdatedAt: this.formatDate(contact.meshUpdatedAt) }),
+      ...(contact.csvRowHash && { meshCsvRowHash: contact.csvRowHash }),
 
       // Interaction Metrics
       relationshipScore: contact.relationshipScore,

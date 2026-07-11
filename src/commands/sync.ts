@@ -4,12 +4,14 @@
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import chalk from 'chalk';
 import ora from 'ora';
 import { ContactMapper } from '../mappers/contact-mapper';
 import { VaultFileManager } from '../vault/file-manager';
 import { TendLogger } from '../utils/logger';
 import { StatusTracker } from '../utils/status-tracker';
+import { mapCsvRowToClayContact, MeshApiClient, parseGroupMembership } from '../mcp/mesh-api';
 import type { ClayContact } from '../models/clay-contact';
 
 interface SyncOptions {
@@ -23,10 +25,16 @@ interface SyncOptions {
   dryRun?: boolean;
   verbose?: boolean;
   mcp?: 'official' | 'local'; // MCP strategy: default is 'official'
+  source?: 'mesh' | 'csv' | 'local' | 'official';
+  reportOnly?: boolean;
+  requireGroup?: boolean;
+  groups?: string;
+  priorityTop?: number;
   skipReview?: boolean; // If true, don't create zReview backups on merge
 }
 
 export async function syncCommand(options: SyncOptions): Promise<void> {
+  loadLocalEnvFile();
   const logger = new TendLogger('Tend-log.md');
 
   try {
@@ -38,7 +46,7 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     if (options.verbose) {
       console.log(chalk.blue('📋 Tend Sync\n'));
       console.log(`Vault: ${vaultPath}`);
-      console.log(`Dry Run: ${options.dryRun ? 'YES' : 'NO'}`);
+      console.log(`Mode: ${formatRunMode(options)}`);
       console.log(`Log file: ${logger.getLogFilePath()}`);
       console.log();
     }
@@ -69,7 +77,8 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     // Initialize file manager and status tracker
     const fileManager = new VaultFileManager({
       vaultPath,
-      skipReview: options.skipReview
+      skipReview: options.skipReview,
+      useCache: !options.dryRun && !options.reportOnly
     });
     const statusTracker = new StatusTracker(vaultPath);
     const mapper = new ContactMapper();
@@ -80,7 +89,7 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     let createdCount = 0;
     let mergedCount = 0;
     let skippedCount = 0; // Unchanged files (optimization)
-    const results: { name: string; status: 'success' | 'error'; message: string; created?: boolean; merged?: boolean; skipped?: boolean; group?: string; communities?: string[] }[] = [];
+    const results: { name: string; status: 'success' | 'error'; message: string; created?: boolean; merged?: boolean; skipped?: boolean; group?: string; communities?: string[]; matchMethod?: string; suggestedFilename?: string }[] = [];
 
     // Process each contact
     for (let i = 0; i < contactData.length; i++) {
@@ -98,11 +107,11 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
 
         // Write to vault
         let writeResult;
-        if (!options.dryRun) {
+        if (!options.dryRun && !options.reportOnly) {
           writeResult = await fileManager.writeContact(tendContact);
           const relativePath = path.relative(vaultPath, writeResult.filepath);
 
-          const actionLabel = writeResult.created ? 'Created' : writeResult.merged ? 'Merged' : 'Updated';
+          const actionLabel = writeResult.created ? 'Created' : writeResult.merged ? 'Merged' : writeResult.skipped ? 'Unchanged' : 'Updated';
 
           logger.logContactProcessing(
             clayContact.name,
@@ -141,18 +150,38 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
             communities: clayContact.groups || []
           });
         } else {
-          // Dry run mode - just show what would be created
-          const filename = clayContact.name + '.md';
+          // Dry run/report mode - match locally without writing files
+          const plan = await fileManager.planContact(tendContact);
+          const relativePath = path.relative(vaultPath, plan.filepath);
+          const actionLabel = formatPlanAction(plan.action);
+
           logger.logContactProcessing(
             clayContact.name,
             'success',
-            `[DRY RUN] Would create: ${filename}`
+            `[${options.reportOnly ? 'REPORT' : 'DRY RUN'}] ${actionLabel}: ${relativePath}`
           );
 
           if (options.verbose) {
-            spinner.info(`[DRY RUN] Would create: ${filename}`);
+            const renameNote = plan.suggestedFilename ? ` → suggested filename: ${plan.suggestedFilename}` : '';
+            spinner.info(`[${options.reportOnly ? 'REPORT' : 'DRY RUN'}] ${actionLabel}: ${relativePath}${renameNote}`);
           } else {
-            spinner.succeed(`${clayContact.name} → ${filename} (dry run)`);
+            spinner.succeed(`${clayContact.name} → ${plan.filename} (${options.reportOnly ? 'report' : 'dry run'})`);
+          }
+
+          writeResult = {
+            filepath: plan.filepath,
+            filename: plan.filename,
+            created: plan.action === 'create',
+            merged: plan.action !== 'create',
+            skipped: false,
+            matchMethod: plan.matchMethod,
+            suggestedFilename: plan.suggestedFilename
+          };
+
+          if (plan.action === 'create') {
+            createdCount++;
+          } else {
+            mergedCount++;
           }
         }
 
@@ -175,7 +204,9 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
           merged: writeResult?.merged,
           skipped: writeResult?.skipped,
           group,
-          communities: displayCommunities
+          communities: displayCommunities,
+          matchMethod: writeResult?.matchMethod,
+          suggestedFilename: writeResult?.suggestedFilename
         });
       } catch (error) {
         errorCount++;
@@ -201,10 +232,14 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     }
 
     // Finalize status tracker - writes all entries as new session at top of Tend-status.md
-    statusTracker.finalizeSession();
+    if (!options.dryRun && !options.reportOnly) {
+      statusTracker.finalizeSession();
+    }
 
     // Flush cache - batched write for performance (single disk write instead of per-contact)
-    await fileManager.flushCache();
+    if (!options.dryRun && !options.reportOnly) {
+      await fileManager.flushCache();
+    }
 
     // Summary
     logger.logSummary(successCount, errorCount, contactData.length);
@@ -216,7 +251,7 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     if (createdCount > 0) detailParts.push(`${createdCount} created`);
     if (mergedCount > 0) detailParts.push(`${mergedCount} merged`);
     if (skippedCount > 0) detailParts.push(`${skippedCount} unchanged`);
-    console.log(chalk.green(`✓ Synced: ${successCount}${detailParts.length > 0 ? ` (${detailParts.join(', ')})` : ''}`));
+    console.log(chalk.green(`✓ ${formatSuccessLabel(options)}: ${successCount}${detailParts.length > 0 ? ` (${detailParts.join(', ')})` : ''}`));
     if (errorCount > 0) {
       console.log(chalk.red(`✗ Failed: ${errorCount}`));
     }
@@ -490,218 +525,361 @@ async function processTextFile(options: SyncOptions, logger: TendLogger): Promis
 }
 
 /**
- * Process CSV file with Clay IDs and checkpoint/resume
+ * Process CSV file with stable Clay/Mesh IDs and checkpoint/resume.
+ *
+ * Group filters happen before API calls. In report-only mode, rows are mapped
+ * from CSV only so the run is fully local and read-only.
  */
 async function processCSVFile(options: SyncOptions, logger: TendLogger): Promise<ClayContact[]> {
   const contacts: ClayContact[] = [];
   const { CheckpointManager } = await import('../utils/checkpoint');
-
-  // 1. Initialize checkpoint manager
   const checkpointMgr = new CheckpointManager();
 
-  // 2. Handle reset checkpoint flag
   if (options.resetCheckpoint) {
     await checkpointMgr.resetCheckpoint();
     logger.logCheckpoint('Checkpoint Reset', 'Starting from sequence 1');
   }
 
-  // 3. Get last processed sequence (or use --start-from override)
-  let startSequence = options.startFrom !== undefined ? options.startFrom : await checkpointMgr.getLastSequence();
+  const startSequence = options.startFrom !== undefined ? options.startFrom : await checkpointMgr.getLastSequence();
   logger.logCheckpoint('Checkpoint Loaded', `Starting from sequence ${startSequence + 1}`);
 
-  // 4. Parse CSV file
   interface CSVRow {
     FirstName: string;
     LastName: string;
+    Name: string;
     ClayID: number;
     Sequence: number;
-    Groups: string[]; // Array of group names from "Group Membership" column
+    Groups: string[];
+    Raw: Record<string, string>;
+    RowHash: string;
   }
 
-  const content = await fs.readFile(options.input!, 'utf-8');
-  const lines = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const rows = await parseCSVRows(options.input!, logger);
+  logger.logCheckpoint('CSV Parsed', `Total rows: ${rows.length}`);
 
-  if (lines.length === 0) {
-    throw new Error('CSV file is empty');
-  }
+  const rowsAfterCheckpoint = options.reportOnly || options.dryRun
+    ? rows
+    : rows.filter(r => r.Sequence > startSequence);
 
-  // Helper function to parse CSV line with quoted field support
-  const parseCSVLine = (line: string): string[] => {
-    const values: string[] = [];
-    let current = '';
-    let inQuotes = false;
+  const groupFilter = buildGroupFilter(options);
+  const filteredRows: CSVRow[] = [];
+  let skippedNoGroup = 0;
+  let skippedByGroup = 0;
 
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      const nextChar = line[i + 1];
-
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          // Escaped quote
-          current += '"';
-          i++;
-        } else {
-          // Toggle quote state
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        // Field separator
-        values.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-
-    // Add final field
-    values.push(current.trim());
-    return values;
-  };
-
-  // Parse header - handle both standard format and compact format
-  const header = parseCSVLine(lines[0]);
-
-  // Determine if this is compact format or standard format
-  const isCompactFormat = header.includes('External ID 1 - Value');
-  const hasSequenceColumn = header.includes('Sequence');
-
-  // Validate required columns
-  if (isCompactFormat) {
-    if (!header.includes('External ID 1 - Value')) {
-      throw new Error('Compact CSV format requires "External ID 1 - Value" column');
-    }
-    logger.logCheckpoint('CSV Format', 'Compact format detected (Name, Given Name, Family Name, External ID 1 - Value)');
-  } else {
-    if (!header.includes('ClayID')) {
-      throw new Error('CSV must have ClayID column (or "External ID 1 - Value" for compact format)');
-    }
-    if (!hasSequenceColumn) {
-      logger.logCheckpoint('CSV Format', 'Standard format (auto-generating sequence numbers)');
-    }
-  }
-
-  // Parse rows
-  const rows: CSVRow[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i]);
-    const row: any = {};
-
-    header.forEach((col, idx) => {
-      row[col] = values[idx];
-    });
-
-    // Map column names to standard format
-    let clayId = row.ClayID || row['External ID 1 - Value'];
-    let firstName = row.FirstName || row['Given Name'] || '';
-    let lastName = row.LastName || row['Family Name'] || '';
-    let sequence = row.Sequence ? parseInt(row.Sequence, 10) : i; // Auto-generate sequence as row number if not provided
-
-    // Parse group membership (split by " ::: " and filter out system entries like "* myContacts")
-    let groups: string[] = [];
-    const groupMembership = row['Group Membership'] || row.Groups || '';
-    if (groupMembership) {
-      groups = groupMembership
-        .split(' ::: ')
-        .map((g: string) => g.trim())
-        .filter((g: string) => g.length > 0 && !g.startsWith('*')); // Filter out empty and system entries
-    }
-
-    // Validate required fields
-    if (!clayId) {
-      logger.logCheckpoint('⚠️  CSV Parse Warning', `Row ${i + 1} missing Clay ID, skipping`);
+  for (const row of rowsAfterCheckpoint) {
+    if (options.requireGroup && row.Groups.length === 0) {
+      skippedNoGroup++;
       continue;
     }
 
-    rows.push({
-      FirstName: firstName,
-      LastName: lastName,
-      ClayID: parseInt(clayId, 10),
-      Sequence: sequence,
-      Groups: groups
-    });
+    if (groupFilter && !row.Groups.some(group => groupFilter.has(group))) {
+      skippedByGroup++;
+      continue;
+    }
+
+    filteredRows.push(row);
   }
 
-  logger.logCheckpoint('CSV Parsed', `Total rows: ${rows.length}`);
+  logger.logCheckpoint(
+    'CSV Group Filtering',
+    `Included: ${filteredRows.length}, Skipped no group: ${skippedNoGroup}, Skipped by group filter: ${skippedByGroup}`
+  );
 
-  // 5. Filter to rows after checkpoint
-  const rowsToProcess = rows.filter(r => r.Sequence > startSequence);
-  logger.logCheckpoint('Filtered by Checkpoint', `Rows to process: ${rowsToProcess.length}`);
-
-  // 6. Apply batch size limit
-  const batchSize = options.batchSize || rowsToProcess.length;
-  const batch = rowsToProcess.slice(0, batchSize);
-
-  if (batchSize < rowsToProcess.length) {
-    console.log(chalk.yellow(`Batch mode: Processing ${batchSize} of ${rowsToProcess.length} remaining contacts`));
-    logger.logCheckpoint('Batch Mode', `Processing ${batchSize} of ${rowsToProcess.length}`);
+  if (options.verbose || options.reportOnly) {
+    console.log(chalk.blue('CSV filter summary:'));
+    console.log(`Rows after checkpoint: ${rowsAfterCheckpoint.length}`);
+    console.log(`Included: ${filteredRows.length}`);
+    if (skippedNoGroup > 0) console.log(`Skipped without real groups: ${skippedNoGroup}`);
+    if (skippedByGroup > 0) console.log(`Skipped outside selected groups: ${skippedByGroup}`);
+    console.log();
   }
 
-  // 7. Initialize MCP client
-  logger.logCheckpoint('MCP Initialization', `Strategy: ${options.mcp || 'local'}`);
+  const batchSize = options.batchSize || filteredRows.length;
+  const batch = filteredRows.slice(0, batchSize);
 
-  const { ClayLocalMCPClient } = await import('../mcp/clay-local');
-  const apiKey = process.env.CLAY_API_KEY;
-  const mcpClient = new ClayLocalMCPClient(apiKey);
+  if (batchSize < filteredRows.length) {
+    console.log(chalk.yellow(`Batch mode: Processing ${batchSize} of ${filteredRows.length} included contacts`));
+    logger.logCheckpoint('Batch Mode', `Processing ${batchSize} of ${filteredRows.length}`);
+  }
 
-  // 8. Process each row
+  const source = options.reportOnly ? 'csv' : (options.source || 'mesh');
+  logger.logCheckpoint('CSV Contact Source', source);
+
+  let mcpClient: any = null;
+  let meshClient: MeshApiClient | null = null;
+
+  if (source === 'mesh') {
+    meshClient = new MeshApiClient();
+  } else if (source === 'local') {
+    const { ClayLocalMCPClient } = await import('../mcp/clay-local');
+    mcpClient = new ClayLocalMCPClient(process.env.CLAY_API_KEY);
+  } else if (source === 'official') {
+    const { MCPClientFactory } = await import('../mcp/client');
+    mcpClient = MCPClientFactory.createClient('official');
+  }
+
   try {
     for (const row of batch) {
-      const displayName = `${row.FirstName} ${row.LastName}`.trim() || `Contact ${row.Sequence}`;
+      const displayName = row.Name || `${row.FirstName} ${row.LastName}`.trim() || `Contact ${row.Sequence}`;
 
       try {
-        logger.logMCPCall('getContact', { contact_id: row.ClayID });
+        let contact: ClayContact;
+        const metadata = {
+          csvRowHash: row.RowHash,
+          meshSyncedAt: new Date().toISOString()
+        };
 
-        // Fetch contact by Clay ID (direct lookup, no search needed!)
-        const contact = await mcpClient.getContact(row.ClayID);
+        if (source === 'mesh' && meshClient) {
+          logger.logMCPCall('mesh.getContact', { contact_id: row.ClayID });
+          contact = await meshClient.getContact(row.ClayID, metadata);
+          logger.logMCPResult('mesh.getContact', 1);
+        } else if ((source === 'local' || source === 'official') && mcpClient) {
+          logger.logMCPCall('getContact', { contact_id: row.ClayID });
+          contact = await mcpClient.getContact(row.ClayID);
+          logger.logMCPResult('getContact', 1);
+        } else {
+          contact = mapCsvRowToClayContact(row.Raw, {
+            ...metadata,
+            source: 'csv'
+          });
+        }
 
-        logger.logMCPResult('getContact', 1);
-
-        // Add groups from CSV to the contact (override Clay's empty groups)
-        if (row.Groups && row.Groups.length > 0) {
+        if (row.Groups.length > 0) {
           contact.groups = row.Groups;
         }
+        contact.csvRowHash = row.RowHash;
 
         contacts.push(contact);
 
-        // Update checkpoint after successful processing
-        await checkpointMgr.updateCheckpoint(row.Sequence);
-        logger.logCheckpoint('Checkpoint Updated', `Sequence: ${row.Sequence}`);
+        if (!options.reportOnly && !options.dryRun) {
+          await checkpointMgr.updateCheckpoint(row.Sequence);
+          logger.logCheckpoint('Checkpoint Updated', `Sequence: ${row.Sequence}`);
+        }
 
-        // Rate limiting: 100ms delay
-        await new Promise(resolve => setTimeout(resolve, 100));
-
+        if (source !== 'csv') {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error(chalk.red(`✗ Error fetching ${displayName} (Seq ${row.Sequence}): ${message}`));
-        logger.logCheckpoint('✗ MCP Error', `Sequence: ${row.Sequence}, Error: ${message}`);
-
-        // Don't update checkpoint on error - allows resume from this point
+        logger.logCheckpoint('✗ Contact Fetch Error', `Sequence: ${row.Sequence}, Error: ${message}`);
       }
     }
   } finally {
-    // Clean up MCP process
-    await mcpClient.cleanup();
+    if (mcpClient) {
+      await mcpClient.cleanup();
+    }
   }
 
-  // Validate all contacts have required fields before returning
-  const invalidContacts: any[] = [];
-  const validContacts = contacts.filter((contact) => {
+  const validContacts = contacts.filter(contact => {
     if (!contact || !contact.name) {
-      invalidContacts.push({
-        id: contact?.id || 'unknown',
-        name: contact?.name || '(empty)',
-        displayName: contact?.displayName || '(none)'
-      });
-      console.warn(chalk.yellow(`⚠️  Skipping invalid contact: ID ${contact?.id}, displayName: "${contact?.displayName || '(empty)'}"`));
+      console.warn(chalk.yellow(`⚠️  Skipping invalid contact: ID ${contact?.id || 'unknown'}`));
       return false;
     }
     return true;
   });
 
-  if (invalidContacts.length > 0) {
-    logger.logCheckpoint('⚠️  Invalid Contacts Filtered', `${invalidContacts.length} contact(s) had missing/null name field: ${invalidContacts.map(c => `ID ${c.id} (${c.displayName})`).join(', ')}`);
+  logger.logCheckpoint('CSV Processing Complete', `Retrieved ${validContacts.length} valid contacts (${contacts.length} total)`);
+  return validContacts;
+}
+
+async function parseCSVRows(input: string, logger: TendLogger): Promise<Array<{
+  FirstName: string;
+  LastName: string;
+  Name: string;
+  ClayID: number;
+  Sequence: number;
+  Groups: string[];
+  Raw: Record<string, string>;
+  RowHash: string;
+}>> {
+  const content = await fs.readFile(input, 'utf-8');
+  const records = parseCSVContent(content);
+
+  if (records.length === 0) {
+    throw new Error('CSV file is empty');
   }
 
-  logger.logCheckpoint('CSV Processing Complete', `Retrieved ${validContacts.length} valid contacts (${contacts.length} total, ${invalidContacts.length} filtered)`);
-  return validContacts;
+  const header = records[0];
+  const isCompactFormat = header.includes('External ID 1 - Value');
+  const hasSequenceColumn = header.includes('Sequence');
+
+  if (isCompactFormat) {
+    logger.logCheckpoint('CSV Format', 'Mesh compact/rich export detected');
+  } else if (!header.includes('ClayID')) {
+    throw new Error('CSV must have ClayID column (or "External ID 1 - Value" for Mesh exports)');
+  } else if (!hasSequenceColumn) {
+    logger.logCheckpoint('CSV Format', 'Standard format (auto-generating sequence numbers)');
+  }
+
+  const rows: Array<{
+    FirstName: string;
+    LastName: string;
+    Name: string;
+    ClayID: number;
+    Sequence: number;
+    Groups: string[];
+    Raw: Record<string, string>;
+    RowHash: string;
+  }> = [];
+
+  for (let i = 1; i < records.length; i++) {
+    const values = records[i];
+    if (values.every(value => value.trim().length === 0)) {
+      continue;
+    }
+    const raw: Record<string, string> = {};
+
+    header.forEach((col, idx) => {
+      raw[col] = values[idx] || '';
+    });
+
+    const clayId = raw.ClayID || raw['External ID 1 - Value'];
+    if (!clayId) {
+      logger.logCheckpoint('⚠️  CSV Parse Warning', `Row ${i + 1} missing Clay/Mesh ID, skipping`);
+      continue;
+    }
+
+    rows.push({
+      FirstName: raw.FirstName || raw['Given Name'] || '',
+      LastName: raw.LastName || raw['Family Name'] || '',
+      Name: raw.Name || '',
+      ClayID: parseInt(clayId, 10),
+      Sequence: raw.Sequence ? parseInt(raw.Sequence, 10) : i,
+      Groups: parseGroupMembership(raw['Group Membership'] || raw.Groups || ''),
+      Raw: raw,
+      RowHash: createHash('sha256').update(JSON.stringify(raw)).digest('hex')
+    });
+  }
+
+  return rows;
+}
+
+function parseCSVContent(content: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    const nextChar = content[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      row.push(current.trim());
+      current = '';
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') {
+        i++;
+      }
+      row.push(current.trim());
+      current = '';
+      if (row.some(value => value.length > 0)) {
+        rows.push(row);
+      }
+      row = [];
+    } else {
+      current += char;
+    }
+  }
+
+  row.push(current.trim());
+  if (row.some(value => value.length > 0)) {
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function buildGroupFilter(options: SyncOptions): Set<string> | null {
+  const selectedGroups = new Set<string>();
+
+  if (options.groups) {
+    options.groups
+      .split(',')
+      .map(group => group.trim())
+      .filter(Boolean)
+      .forEach(group => selectedGroups.add(group));
+  }
+
+  if (options.priorityTop && options.priorityTop > 0) {
+    for (const group of loadPriorityGroups(options.priorityTop)) {
+      selectedGroups.add(group);
+    }
+  }
+
+  return selectedGroups.size > 0 ? selectedGroups : null;
+}
+
+function loadPriorityGroups(limit: number): string[] {
+  const priorityPath = path.join(process.cwd(), 'config/group-priority.md');
+  if (!fs.pathExistsSync(priorityPath)) {
+    return [];
+  }
+
+  const groups: string[] = [];
+  const content = fs.readFileSync(priorityPath, 'utf-8');
+  for (const line of content.split('\n')) {
+    const match = line.trim().match(/^\d+\.\s+(.+)$/);
+    if (match) {
+      groups.push(match[1].trim());
+      if (groups.length >= limit) break;
+    }
+  }
+  return groups;
+}
+
+function formatPlanAction(action: string): string {
+  switch (action) {
+    case 'create':
+      return 'Would create';
+    case 'merge':
+      return 'Would merge by ID';
+    case 'adopt-legacy':
+      return 'Would adopt legacy note by name';
+    case 'suggest-rename':
+      return 'Would merge by ID';
+    default:
+      return 'Would update';
+  }
+}
+
+function formatRunMode(options: SyncOptions): string {
+  if (options.reportOnly) return 'REPORT ONLY';
+  if (options.dryRun) return 'DRY RUN';
+  return 'WRITE';
+}
+
+function formatSuccessLabel(options: SyncOptions): string {
+  if (options.reportOnly) return 'Report OK';
+  if (options.dryRun) return 'Would sync';
+  return 'Synced';
+}
+
+function loadLocalEnvFile(): void {
+  const envPath = path.join(process.cwd(), '.env');
+  if (!fs.pathExistsSync(envPath)) {
+    return;
+  }
+
+  const content = fs.readFileSync(envPath, 'utf-8');
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) {
+      continue;
+    }
+
+    const [key, ...valueParts] = trimmed.split('=');
+    const value = valueParts.join('=').trim().replace(/^['"]|['"]$/g, '');
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
 }
